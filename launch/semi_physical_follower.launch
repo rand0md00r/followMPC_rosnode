@@ -1,0 +1,29 @@
+<launch>
+    <!--  ************** Global Parameters ***************  -->
+    <param name="use_sim_time" value="false"/>
+    <arg name="trajectory_type" default="circle" doc="opt: line, circle, infinity, rectangle, epitrochoid"/>
+
+    <!--  ************** Target point generation **************  -->
+    <node name="mpc_trajectory_generation" pkg="mpc_ros" type="dynamic_point_publisher.py">
+        <param name="trajectory_type" value="$(arg trajectory_type)"/>
+    </node>
+    <!-- <node name="mpc_trajectory_generation" pkg="mpc_ros" type="gen_rounded_rectangle.py" if="$(eval trajectory_type == 'rectangle')">
+    </node> -->
+
+    <!--  ************** MPC Node **************  -->
+    <node name="MPC_tracking" pkg="mpc_ros" type="follow_mpc" output="screen" >
+        <rosparam file="$(find mpc_ros)/params/semi_physical_follower.yaml" command="load" />
+        <param name="mpc_w_ex" type="double" value="90000.0" if="$(eval trajectory_type == 'infinity')"/>
+        <param name="mpc_w_etheta" type="double" value="10000" if="$(eval trajectory_type == 'infinity')"/>
+
+        <param name="mpc_max_angvel" type="double" value="3.0" if="$(eval trajectory_type == 'rectangle')"/>
+        <param name="mpc_w_angvel_d" type="double" value="10000.0" if="$(eval trajectory_type == 'rectangle')"/>
+    </node>
+
+    <!--  ************** Visualisation **************  -->
+    <!-- <node name="rviz" pkg="rviz" type="rviz" args="-d $(find mpc_ros)/rviz/rviz_target_track.rviz"/> -->
+
+    <!--  ************** Error Graph **************  -->
+    <!-- <node name="drawError" pkg="mpc_ros" type="drawError.py" output="screen"/> -->
+
+</launch>

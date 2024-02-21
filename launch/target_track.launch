@@ -1,0 +1,79 @@
+<launch>
+    <!--  ************** Global Parameters ***************  -->
+    <param name="use_sim_time" value="true"/>
+    <arg name="gui" default="false"/>
+    <arg name="trajectory_type" default="circle" doc="opt: line, circle, infinity, rectangle, epitrochoid"/>
+    
+    <!--  ************** GAZEBO Simulator ***************  -->
+    <arg name="z_pos" default="0.0"/>
+    <arg name="roll" default="0"/>
+    <arg name="pitch" default="0"/>
+    <!-- line -->
+    <arg name="x_pos" default="-3.0" if="$(eval trajectory_type == 'line')" />
+    <arg name="y_pos" default="-2" if="$(eval trajectory_type == 'line')" />
+    <arg name="yaw" default="1.57" if="$(eval trajectory_type == 'line')" />
+    <!-- circle -->
+    <arg name="x_pos" default="3.0" if="$(eval trajectory_type == 'circle')" />
+    <arg name="y_pos" default="0.0" if="$(eval trajectory_type == 'circle')" />
+    <arg name="yaw" default="1.57" if="$(eval trajectory_type == 'circle')" />
+    <!-- infinity -->
+    <arg name="x_pos" default="1.0" if="$(eval trajectory_type == 'infinity')" />
+    <arg name="y_pos" default="-1.0" if="$(eval trajectory_type == 'infinity')" />
+    <arg name="yaw" default="3.14" if="$(eval trajectory_type == 'infinity')" />
+    <!-- rectangle -->
+    <arg name="x_pos" default="0.0" if="$(eval trajectory_type == 'rectangle')" />
+    <arg name="y_pos" default="0.0" if="$(eval trajectory_type == 'rectangle')" />
+    <arg name="yaw" default="1.57" if="$(eval trajectory_type == 'rectangle')" />
+    <!-- epitrochoid -->
+    <arg name="x_pos" default="1.0" if="$(eval trajectory_type == 'epitrochoid')" />
+    <arg name="y_pos" default="0.0" if="$(eval trajectory_type == 'epitrochoid')" />
+    <arg name="yaw" default="0" if="$(eval trajectory_type == 'epitrochoid')" />
+    
+    <!--  ************** Robot model ***************  -->
+    <param name="robot_description" command="$(find xacro)/xacro $(find base_ws)/urdf/base.xacro" />
+
+    <include file="$(find gazebo_ros)/launch/empty_world.launch">
+        <arg name="world_name" value="$(find gazebo_ros)/launch/empty_world.launch"/>
+        <arg name="paused" value="false"/>
+        <arg name="use_sim_time" value="true"/>
+        <arg name="gui" value="$(arg gui)"/>
+        <arg name="headless" value="false"/>
+        <arg name="debug" value="false"/>
+    </include>
+
+    <node name="spawn_urdf" pkg="gazebo_ros" type="spawn_model" args="-urdf -model servingbot -x $(arg x_pos) -y $(arg y_pos) -z $(arg z_pos) -R $(arg roll) -P $(arg pitch) -Y $(arg yaw) -param robot_description" />
+     
+    <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher">
+        <param name="publish_frequency" type="double" value="50.0" />
+    </node>
+    <node name="joint_state_publisher" pkg="joint_state_publisher" type="joint_state_publisher" >
+        <param name="publish_frequency" type="double" value="50.0" />
+    </node>
+
+
+    <!--  ************** Target point generation **************  -->
+    <node name="mpc_trajectory_generation" pkg="mpc_ros" type="dynamic_point_publisher.py">
+        <param name="trajectory_type" value="$(arg trajectory_type)"/>
+    </node>
+    <!-- <node name="mpc_trajectory_generation" pkg="mpc_ros" type="gen_rounded_rectangle.py" if="$(eval trajectory_type == 'rectangle')">
+    </node> -->
+
+    <!--  ************** obstacles point generation **************  -->
+    <node name="obstacle_generation" pkg="mpc_ros" type="obstacle_generation.py">
+    </node>
+
+    <!--  ************** MPC Node **************  -->
+    <node name="MPC_tracking" pkg="mpc_ros" type="follow_mpc" output="screen" >
+        <rosparam file="$(find mpc_ros)/params/mpc_target_track.yaml" command="load" />
+
+        <param name="mpc_max_angvel" type="double" value="3.0" if="$(eval trajectory_type == 'rectangle')"/>
+        <param name="mpc_w_angvel_d" type="double" value="10000.0" if="$(eval trajectory_type == 'rectangle')"/>
+    </node>
+
+    <!--  ************** Visualisation **************  -->
+    <node name="rviz" pkg="rviz" type="rviz" args="-d $(find mpc_ros)/rviz/rviz_target_track.rviz"/>
+
+    <!--  ************** Error Graph **************  -->
+    <!-- <node name="drawError" pkg="mpc_ros" type="drawError.py" output="screen"/> -->
+
+</launch>
