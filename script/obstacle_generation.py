@@ -22,14 +22,14 @@ def points_to_marker_array(points):
     for i, point in enumerate(points):
         marker = Marker()
         marker.header.frame_id = "odom"
-        marker.type = Marker.SPHERE
+        marker.type = Marker.CUBE
         marker.action = Marker.ADD
         marker.pose.position.x = point[0]
         marker.pose.position.y = point[1]
         marker.pose.position.z = 0
         marker.scale.x = 0.3
         marker.scale.y = 0.3
-        marker.scale.z = 0.3
+        marker.scale.z = 1.0
         marker.color.a = 1.0
         marker.color.r = 1.0
         marker.color.g = 0.0
@@ -55,5 +55,5 @@ while not rospy.is_shutdown():
     points = generate_points(time, radius, center)
     marker_array = points_to_marker_array(points)
     pub.publish(marker_array)
-    time += 0.08
+    time += 0.03
     rate.sleep()

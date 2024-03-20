@@ -9,6 +9,37 @@
 
 using CppAD::AD;
 
+AD<double> h(vector<AD<double>> curpos_, vector<AD<double>> ob_){
+    float safe_dist = 0.5;
+
+    AD<double>  c = CppAD::cos(ob_[4]);
+    AD<double>  s = CppAD::sin(ob_[4]);
+    AD<double>  a = ob_[2];
+    AD<double>  b = ob_[3];
+
+    vector<AD<double> > ob_vec = {ob_[0], ob_[1]};
+    vector<AD<double> > center_vec(2);
+    center_vec[0] = curpos_[0] - ob_vec[0];
+    center_vec[1] = curpos_[1] - ob_vec[1];
+
+    AD<double>  dist = b * (
+        sqrt( ((c*c) / (a*a) + (s*s) / (b*b)) * (center_vec[0]*center_vec[0]) + ((s*s) / (a*a) + (c*c) / (b*b)) *
+        (center_vec[1]*center_vec[1]) + 2*c*s*(1 / (a*a) - 1 / (b*b)) * center_vec[0] * center_vec[1]) - 1) - safe_dist;
+    
+    return dist;
+}
+
+AD<double> h_pure_dist(vector<AD<double>> curpos_, vector<AD<double>> ob_){
+    vector<AD<double> > ob_vec = {ob_[0], ob_[1]};
+    vector<AD<double> > center_vec(2);
+    center_vec[0] = curpos_[0] - ob_vec[0];
+    center_vec[1] = curpos_[1] - ob_vec[1];
+
+    AD<double>  dist = sqrt(center_vec[0]*center_vec[0] + center_vec[1]*center_vec[1]) - 0.5;
+    return dist;
+}
+
+
 // =========================================
 // FG_eval class definition implementation.
 // =========================================
@@ -17,9 +48,14 @@ class FG_eval
     public:
         double _dt, _ref_ey, _ref_vel, _l; 
         double  _w_ex, _w_ey, _w_etheta, _w_vel, _w_ev, _w_ew, _w_angvel, _w_angvel_d, _w_vel_d;
-        int _mpc_steps, _x_start, _y_start, _theta_start, _v_start, _ex_start, _ey_start, _etheta_start, _angvel_start;
+        int _mpc_steps, _x_start, _y_start, _theta_start, _v_start, _ex_start, _ey_start, _etheta_start, _angvel_start, _cbf_start;
         Eigen::VectorXd _target_params;
         AD<double> cost_ex, cost_ey, cost_vel, cost_etheta, cost_angvel,cost_angvel_d, cost_vel_d;
+
+        vector<vector<double>> _ob;
+        vector<double> _cur_state;
+        float gamma_k;
+
         // Constructor
         FG_eval()
         { 
@@ -47,10 +83,13 @@ class FG_eval
             _etheta_start  = _ey_start + _mpc_steps;
             _v_start = _etheta_start + _mpc_steps - 1;
             _angvel_start    = _v_start + _mpc_steps - 1;
+            _cbf_start = _angvel_start + _mpc_steps;
+
+            gamma_k = 1.0;
         }
 
         // Load parameters for constraints
-        void LoadParams(const std::map<string, double> &params, Eigen::VectorXd target_params)
+        void LoadParams(const std::map<string, double> &params, Eigen::VectorXd target_params, const vector<vector<double>>& ob, const vector<double>& init_state)
         {
             _target_params = target_params;
             _dt = params.find("DT") != params.end() ? params.at("DT") : _dt;
@@ -67,14 +106,9 @@ class FG_eval
 
             _ref_vel = _target_params[3];   // 动点速度
 
-            _x_start     = 0;
-            _y_start     = _x_start + _mpc_steps;
-            _theta_start   = _y_start + _mpc_steps;
-            _ex_start   = _theta_start + _mpc_steps;
-            _ey_start  = _ex_start + _mpc_steps;
-            _etheta_start  = _ey_start + _mpc_steps;
-            _v_start = _etheta_start + _mpc_steps - 1;
-            _angvel_start    = _v_start + _mpc_steps - 1;
+            _ob = ob;
+            _cur_state = init_state;
+
         }
 
         typedef CPPAD_TESTVECTOR(AD<double>) ADvector; 
@@ -104,9 +138,9 @@ class FG_eval
                 cost_vel += _w_vel * CppAD::pow(vars[_v_start + i], 2);
                 cost_angvel += _w_angvel * CppAD::pow(vars[_angvel_start + i], 2);
             }
-            cout << "--- costs   ---" <<endl;
-            cout << "ex: " << cost_ex << ", \t etheta:" << cost_etheta << endl;
-            cout << "vel:" << cost_vel << ", \t angvel:" << cost_angvel << endl;
+            // cout << "--- costs   ---" <<endl;
+            // cout << "ex: " << cost_ex << ", \t etheta:" << cost_etheta << endl;
+            // cout << "vel:" << cost_vel << ", \t angvel:" << cost_angvel << endl;
 
             // 角速度、加速度变化惩罚
             for (int i = 0; i < _mpc_steps - 2; i++) {
@@ -116,7 +150,7 @@ class FG_eval
               cost_angvel_d += _w_angvel_d * CppAD::pow(vars[_angvel_start + i + 1] - vars[_angvel_start + i], 2);
               cost_vel_d += _w_vel_d * CppAD::pow(vars[_v_start + i + 1] - vars[_v_start + i], 2);
             }
-            cout << "cost_vel_d, : " << cost_vel_d << ", \t _w_vel_d:" << _w_vel_d << endl;
+            // cout << "cost_vel_d, : " << cost_vel_d << ", \t _w_vel_d:" << _w_vel_d << endl;
             
             // fg[x] 约束
             // Initial constraints
@@ -139,6 +173,21 @@ class FG_eval
             fg[1 + _ex_start] = vars[_ex_start];
             fg[1 + _ey_start] = vars[_ey_start];
             fg[1 + _etheta_start] = vars[_etheta_start];
+            
+            // cbf约束
+
+            if(!_ob.empty()){
+
+                vector<AD<double>> ob_1 = {_ob[1][0], _ob[1][1], _ob[1][2], _ob[1][3], _ob[1][4]};
+                vector<AD<double>> ob_0 = {_ob[0][0], _ob[0][1], _ob[0][2], _ob[0][3], _ob[0][4]};
+                AD<double> h1 = h_pure_dist({vars[_x_start + 1], vars[_y_start + 1]}, ob_1);
+                AD<double> h0 = h_pure_dist({vars[_x_start], vars[_y_start]}, ob_0);
+                fg[1 + _cbf_start] = h1 - (1 - gamma_k) * h0;
+            } 
+            else {
+                cout << "obstacle location have not been received" << endl;
+                fg[1 + _cbf_start] = 1.0e19;
+            }
 
             // 系统运动学模型约束 单射
             for (int i = 0; i < _mpc_steps - 1; i++)
@@ -170,9 +219,19 @@ class FG_eval
                 fg[2 + _ey_start + i]    = ey1 - (ey0 + ((vR0 - yd*wR0)*CppAD::sin(thetaE0) + xd*wR0*CppAD::cos(thetaE0) - ex0*w0 - w0*_l) * _dt);
                 fg[2 + _etheta_start + i]= thetaE1 - (thetaE0 + (wR0 - w0) * _dt);
 
+                // cbf 约束
+                if(!_ob.empty()){
+                    vector<AD<double>> ob_next = {_ob[i + 1][0], _ob[i + 1][1], _ob[i + 1][2], _ob[i + 1][3], _ob[i + 1][4]};
+                    vector<AD<double>> ob_cur = {_ob[i][0], _ob[i][1], _ob[i][2], _ob[i][3], _ob[i][4]};
+                    AD<double> h_next = h_pure_dist({vars[_x_start + i + 1], vars[_y_start + i + 1]}, ob_next);
+                    AD<double> h_cur = h_pure_dist({vars[_x_start + i], vars[_y_start + i]}, ob_cur);
+                    fg[2 + _cbf_start + i]   = h_next - (1 - gamma_k) * h_cur;
+                } 
+                else {
+                    fg[2 + _cbf_start + i] = 1.0e19;
+                }
 
-                // xR0 = xR0 + vR0 * CppAD::cos(thetaR0) * _dt;
-                // yR0 = yR0 + vR0 * CppAD::sin(thetaR0) * _dt;
+
                 thetaR0 = thetaR0 + wR0 * _dt;
                 vR0 = vR0 + aR * _dt;
 
@@ -185,6 +244,15 @@ class FG_eval
                 // fg[1 + _v_start + i]     = v0 + a0 * _dt;
                 // fg[1 + _angvel_start + i]= w0 + dw0 * _dt;
             }
+
+            // Print fg values
+            for (int i = _cbf_start; i < _cbf_start + _mpc_steps; ++i) {
+                cout << "fg[" << i << "]: " << fg[i] << ", ";
+                if ((i + 1) % 5 == 0) {
+                    cout << endl;
+                }
+            }
+            cout << endl;
         }
 };
 
@@ -208,13 +276,14 @@ MPC::MPC()
     _etheta_start  = _ey_start + _mpc_steps;
     _v_start = _etheta_start + _mpc_steps - 1;     // TODO 考虑ev ew
     _angvel_start    = _v_start + _mpc_steps - 1;  // TODO 考虑ev ew   // 状态量 x y theta, 控制量v w
+    _cbf_start = _angvel_start + _mpc_steps;
 }
 
 void MPC::LoadParams(const std::map<string, double> &params)
 {   
-    cout << "MPC params 的大小:" << params.size() << endl;
+    // cout << "MPC params 的大小:" << params.size() << endl;
     _params = params;
-    cout << "MPC _params 的大小:" << _params.size() << endl;
+    // cout << "MPC _params 的大小:" << _params.size() << endl;
     //Init parameters for MPC object
     _mpc_steps = _params.find("STEPS") != _params.end() ? _params.at("STEPS") : _mpc_steps;
     _max_angvel = _params.find("ANGVEL") != _params.end() ? _params.at("ANGVEL") : _max_angvel;
@@ -222,16 +291,12 @@ void MPC::LoadParams(const std::map<string, double> &params)
     _bound_value  = _params.find("BOUND") != _params.end()  ? _params.at("BOUND") : _bound_value;
     _max_vel = _params.find("MAXVEL") != _params.end()  ? _params.at("MAXVEL") : _max_vel;
     
-    _x_start     = 0;
-    _y_start     = _x_start + _mpc_steps;
-    _theta_start   = _y_start + _mpc_steps;
-    _ex_start   = _theta_start + _mpc_steps;
-    _ey_start  = _ex_start + _mpc_steps;
-    _etheta_start  = _ey_start + _mpc_steps;
-    _v_start = _etheta_start + _mpc_steps - 1;     // TODO 考虑ev ew
-    _angvel_start    = _v_start + _mpc_steps - 1;  // TODO 考虑ev ew   // 状态量 x y theta, 控制量v w
 }
 
+
+double distance_global(vector<double> c1, vector<double> c2){
+    return sqrt(pow(c1[0] - c2[0], 2) + pow(c1[1] - c2[1], 2));
+}
 
 vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd target_params) 
 {
@@ -249,7 +314,8 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd target_params)
     size_t n_vars = _mpc_steps * 6 + (_mpc_steps - 1) * 2;// TODO 考虑ev ew
     
     // Set the number of constraints
-    size_t n_constraints = _mpc_steps * 6;          // TODO 考虑ev ew
+    // size_t n_constraints = _mpc_steps * 6;          // TODO 考虑ev ew
+    size_t n_constraints = _cbf_start + _mpc_steps; // 添加CBF约束
 
     // 初始化变量
     // SHOULD BE 0 besides initial state.
@@ -280,8 +346,8 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd target_params)
     // 速度上下限
     for (int i = _v_start; i < _angvel_start; i++) 
     {
-        // vars_lowerbound[i] = -_max_vel;
-        vars_lowerbound[i] = 0;
+        vars_lowerbound[i] = -_max_vel;
+        // vars_lowerbound[i] = 0;
         vars_upperbound[i] = _max_vel;
     }
     //  角度的上限和下限分别设置为-25度和25度（以弧度为单位的值）。
@@ -314,9 +380,14 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd target_params)
     constraints_upperbound[_ey_start] = ey;
     constraints_upperbound[_etheta_start] = etheta;
 
+    // cbf约束的上限为极大的值
+    for(int i = _cbf_start; i < n_constraints; ++i){
+        constraints_upperbound[i] = 1.0e19;
+    }
+
     // 计算目标和约束的对象
     FG_eval fg_eval;
-    fg_eval.LoadParams(_params, target_params);
+    fg_eval.LoadParams(_params, target_params, ob, init_states);
 
     // options for IPOPT solver
     std::string options;
