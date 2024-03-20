@@ -9,7 +9,7 @@ Panels:
         - /Desire1
         - /Follow car1
       Splitter Ratio: 0.6050959825515747
-    Tree Height: 869
+    Tree Height: 443
   - Class: rviz/Selection
     Name: Selection
   - Class: rviz/Tool Properties
@@ -359,7 +359,7 @@ Visualization Manager:
           Marker Topic: /traj_pred_node/predictions
           Name: obstacle_pred
           Namespaces:
-            {}
+            prediction: true
           Queue Size: 100
           Value: true
       Enabled: true
@@ -458,7 +458,7 @@ Visualization Manager:
           Buffer Length: 1
           Class: rviz/Path
           Color: 255; 0; 0
-          Enabled: true
+          Enabled: false
           Head Diameter: 0.30000001192092896
           Head Length: 0.009999999776482582
           Length: 0.4000000059604645
@@ -476,6 +476,14 @@ Visualization Manager:
           Shaft Length: 0.009999999776482582
           Topic: /mpc_trajectory
           Unreliable: false
+          Value: false
+        - Class: rviz/MarkerArray
+          Enabled: true
+          Marker Topic: /mpc_trajectory_marker
+          Name: MPC_Trajectory
+          Namespaces:
+            mpc_traj: true
+          Queue Size: 100
           Value: true
       Enabled: true
       Name: Follow car
@@ -507,16 +515,16 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 21.67877197265625
+      Distance: 19.336559295654297
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: -3.398203134536743
-        Y: 1.0748913288116455
-        Z: -1.7775253057479858
+        X: -3.5231828689575195
+        Y: 0.8414657711982727
+        Z: -1.777664303779602
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
@@ -525,7 +533,7 @@ Visualization Manager:
       Pitch: 1.5697963237762451
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 4.6754150390625
+      Yaw: 4.7804155349731445
     Saved: ~
 Window Geometry:
   Displays:
@@ -543,5 +551,5 @@ Window Geometry:
   Views:
     collapsed: true
   Width: 1062
-  X: 858
+  X: 321
   Y: 27

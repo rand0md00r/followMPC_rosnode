@@ -2,7 +2,7 @@
 target_topic    : "/target_point/pose"
 odom_topic      : "/odom_gazebo"              # defalut： /odom
 desirePos_topic : "/desire_pose"        # optional
-marker_topic    : "/traj_pred_node/predictions"     # outdoor test target topic
+marker_topic    : "/visualization_marker"     # outdoor test target topic
 
 global_frame    : "odom"
 car_frame       : "base_footprint"

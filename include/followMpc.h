@@ -35,12 +35,16 @@ class MPC
         vector<double> mpc_y;
         vector<double> mpc_theta;
 
+        vector<vector<vector<double>>> obs;
+        vector<vector<double>> ob;
+        vector<double> init_states; // (x, y, theta, v, w, a, dw)
+
         void LoadParams(const std::map<string, double> &params);
     
     private:
         // Parameters for mpc solver
         double _max_angvel, _max_throttle, _bound_value, _max_vel, _max_a, _max_dw;
-        int _mpc_steps, _x_start, _y_start, _theta_start, _v_start, _ex_start, _ey_start, _etheta_start, _angvel_start, _a_start, _dw_start;
+        int _mpc_steps, _x_start, _y_start, _theta_start, _v_start, _ex_start, _ey_start, _etheta_start, _angvel_start, _a_start, _dw_start, _cbf_start;
         std::map<string, double> _params;
 
         unsigned int dis_cnt;

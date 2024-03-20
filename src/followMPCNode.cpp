@@ -10,7 +10,7 @@
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #include <nav_msgs/Path.h>
 #include <nav_msgs/Odometry.h>
-#include <visualization_msgs/Marker.h>
+#include <visualization_msgs/MarkerArray.h>
 #include <tf2_ros/transform_listener.h>
 
 #include <fstream>
@@ -35,7 +35,7 @@ class MPCNode
     private:
         ros::NodeHandle _nh;
         ros::Subscriber _sub_odom, _sub_target, _sub_marker;
-        ros::Publisher _pub_twist, _pub_mpctraj, _pub_target_prediction, _pub_follow_path, _pub_bazier_path, _pub_desire_pose, _pub_desirePointPath;
+        ros::Publisher _pub_twist, _pub_mpctraj, _pub_target_prediction, _pub_follow_path, _pub_bazier_path, _pub_desire_pose, _pub_desirePointPath, _pub_mpctrajmarker;
         ros::Timer _timer1;
         tf::TransformListener _tf_listener;
         ros::Time tracking_stime;
@@ -80,12 +80,12 @@ class MPCNode
         void odomCB(const nav_msgs::Odometry::ConstPtr& odomMsg);
         void followControlLoopCB(const ros::TimerEvent&);
         void targetCB(const geometry_msgs::PoseStamped::ConstPtr &targetMsg);
-        void markerCB(const visualization_msgs::Marker::ConstPtr &targetMsg);
+        void markerCB(const visualization_msgs::MarkerArray::ConstPtr &targetMsg);
         void pubTargetPrediction(const VectorXd& target_params);
         void pubFollowPath(double x, double y, double theta);
-        std::vector<std::vector<double>> bezier_curve(double start_x, double start_y, double start_theta, double end_x, double end_y, double end_theta, int num_points);
-        double calculate_heading_error(const std::vector<std::vector<double>>& curve, double start_theta, double end_theta, double l);
-        void publishBezierCurve(const std::vector<std::vector<double>>& bezierCurve);
+        vector<vector<double>> bezier_curve(double start_x, double start_y, double start_theta, double end_x, double end_y, double end_theta, int num_points);
+        double calculate_heading_error(const vector<vector<double>>& curve, double start_theta, double end_theta, double l);
+        void publishBezierCurve(const vector<vector<double>>& bezierCurve);
         void publishDesirePose(double x_des, double y_des, double theta_des);
         void publishMPCTraj();
 }; // end of class
@@ -103,35 +103,37 @@ MPCNode::MPCNode()
     pn.param("controller_freq", _controller_freq, 10);
     _dt = double(1.0/_controller_freq); // time step duration dt in s 
     pn.param("l_hand", _l, 0.5);  //手端模型
-    pn.param("distance_in_queue", _distance_in_queue, 2.0);
+    pn.param("distance_in_queue", _distance_in_queue, 100.0);
 
     // 加载求解MPC参数
     pn.param("target_distance", _distance,  1.0);
-    pn.param("target_alpha",    _alpha,     0.0);
+    pn.param("target_alpha",    _alpha,     3.14);
     pn.param("mpc_steps",       _mpc_steps, 20.0);
-    pn.param("mpc_w_ex",        _w_ex,      10000.0);
-    pn.param("mpc_w_etheta",    _w_etheta,  10.0);
+    pn.param("mpc_w_ex",        _w_ex,      1000.0);
+    pn.param("mpc_w_etheta",    _w_etheta,  1.0);
     pn.param("mpc_w_vel",       _w_vel,     1000.0);
-    pn.param("mpc_w_vel_d",     _w_vel_d,   1000.0);
-    pn.param("mpc_w_angvel",    _w_angvel,  10.0);
-    pn.param("mpc_w_angvel_d",  _w_angvel_d,   1000.0);
-    pn.param("mpc_max_angvel",  _max_angvel,   1.5); // Maximal angvel radian (~30 deg)
+    pn.param("mpc_w_vel_d",     _w_vel_d,   0.0);
+    pn.param("mpc_w_angvel",    _w_angvel,  0.0);
+    pn.param("mpc_w_angvel_d",  _w_angvel_d,   10000.0);
+    pn.param("mpc_max_angvel",  _max_angvel,   5.0); // Maximal angvel radian (~30 deg)
     pn.param("mpc_bound_value", _bound_value,  1.0e6);
 
     // 话题&坐标系参数
-    pn.param<std::string>("target_topic", _target_topic, "/target_point/pose" );
-    pn.param<std::string>("odom_topic", _odom_topic, "/odom_gazebo" );
-    pn.param<std::string>("marker_topic", _marker_topic, "/visualization_marker" );
-    pn.param<std::string>("map_frame", _map_frame, "map" ); //*****for mpc, "odom"
-    pn.param<std::string>("global_frame", _odom_frame, "odom");
-    pn.param<std::string>("car_frame", _car_frame, "base_footprint" );
+    pn.param<string>("target_topic", _target_topic, "/target_point/pose" );
+    pn.param<string>("odom_topic", _odom_topic, "/odom_gazebo" );
+    pn.param<string>("marker_topic", _marker_topic, "/traj_pred_node/predictions" );
+    pn.param<string>("map_frame", _map_frame, "map" ); //*****for mpc, "odom"
+    pn.param<string>("global_frame", _odom_frame, "odom");
+    pn.param<string>("car_frame", _car_frame, "base_footprint" );
 
     // 发布和订阅
     _sub_odom   = _nh.subscribe( _odom_topic, 1, &MPCNode::odomCB, this);
     _sub_target = _nh.subscribe( _target_topic, 1, &MPCNode::targetCB, this);
     _sub_marker = _nh.subscribe( _marker_topic, 1, &MPCNode::markerCB, this);
+    ROS_INFO("Subscribed to %s, %s, %s", _odom_topic.c_str(), _target_topic.c_str(), _marker_topic.c_str());
 
     _pub_mpctraj   = _nh.advertise<nav_msgs::Path>("/mpc_trajectory", 1);
+    _pub_mpctrajmarker = _nh.advertise<visualization_msgs::MarkerArray>("/mpc_trajectory_marker", 1);
     if(_pub_twist_flag)
         _pub_twist = _nh.advertise<geometry_msgs::Twist>("/cmd_vel", 1);
     _pub_target_prediction = _nh.advertise<visualization_msgs::Marker>("/target_prediction", 1);
@@ -242,12 +244,95 @@ void MPCNode::targetCB(const geometry_msgs::PoseStamped::ConstPtr& targetMsg)
     }
 }
 
-void MPCNode::markerCB(const visualization_msgs::Marker::ConstPtr &targetMsg) {
+vector<vector<double>> linear_interpolation(vector<vector<double>> trajectory, double sampling_time) {
+    // Check the validity of the input trajectory
+    if (trajectory.size() != 8 || trajectory[0].size() != 2) {
+        cout << "Invalid trajectory format." << endl;
+        return {};
+    }
+
+    // Calculate the number of samples
+    int num_samples = static_cast<int>(3.2 / sampling_time) + 1;
+
+    // Initialize the interpolated trajectory sequence
+    vector<vector<double>> interpolated_trajectory(num_samples, vector<double>(2, 0.0));
+
+    // Linear interpolation
+    for (int i = 0; i < num_samples; ++i) {
+        double t = i * sampling_time;
+
+        // Find the trajectory segment corresponding to the current time
+        int segment = static_cast<int>(t / 0.4);
+        segment = min(max(segment, 0), static_cast<int>(trajectory.size()) - 2);
+
+        // Calculate interpolation weights
+        double alpha = (t - segment * 0.4) / 0.4;
+        double beta = 1.0 - alpha;
+
+        // Linear interpolation
+        interpolated_trajectory[i][0] = beta * trajectory[segment][0] + alpha * trajectory[segment + 1][0];
+        interpolated_trajectory[i][1] = beta * trajectory[segment][1] + alpha * trajectory[segment + 1][1];
+    }
+
+    return interpolated_trajectory;
+}
+
+
+
+void MPCNode::markerCB(const visualization_msgs::MarkerArray::ConstPtr &targetMsg) {
+    // 障碍物预测轨迹的回调函数
+
+    _mpc.obs.clear();
+    double min_dist = std::numeric_limits<double>::max();
+
+    for (auto it = targetMsg->markers.begin(); it != targetMsg->markers.end(); ++it) {
+        // cur_ob 包含8个预测点，每个预测点包含5个参数（Xob, Yob, a, b, theta）
+        vector<vector<double>> cur_ob;
+        
+        for(auto pt = it->points.begin(); pt != it->points.end(); ++pt) {
+            // 遍历每个预测点
+            vector<double> cur_pt;
+            cur_pt.push_back(pt->x);
+            cur_pt.push_back(pt->y);
+            cur_ob.push_back(cur_pt);
+        }
+
+        cur_ob = linear_interpolation(cur_ob, 0.1);
+
+        // 计算每个位置之间的线速度v和方向theta
+        for (int i = 0; i < cur_ob.size(); ++i) {
+            double delta_x = cur_ob[i][0] - cur_ob[(i + 1) % cur_ob.size()][0];
+            double delta_y = cur_ob[i][1] - cur_ob[(i + 1) % cur_ob.size()][1];
+            double v = sqrt(delta_x * delta_x + delta_y * delta_y);
+            double theta = atan2(delta_y, delta_x);
+
+            // cur_ob[i].push_back(v);   // v for a
+            cur_ob[i].push_back(1.0);       // 暂时用圆形代替
+            cur_ob[i].push_back(1.0); // 1.0 for b
+            cur_ob[i].push_back(theta);
+        }
+        _mpc.obs.push_back(cur_ob);
+
+        // 记录距离最近的障碍物
+
+        if(_mpc.init_states.empty()) {
+            cout << "init states is empty" << endl;
+            return;
+        }
+        double dx = it->points[0].x - _mpc.init_states[0];
+        double dy = it->points[0].y - _mpc.init_states[1];
+        double cur_dist = dx * dx + dy * dy;
+        
+        if(cur_dist < min_dist){
+            min_dist = cur_dist;
+            _mpc.ob = cur_ob;
+        }
+    }
 }
 
 void MPCNode::pubTargetPrediction(const VectorXd& target_params) {
     visualization_msgs::Marker marker;
-    marker.header.frame_id = "odom";
+    marker.header.frame_id = _odom_frame;
     marker.header.stamp = ros::Time::now();
     marker.ns = _nh.getNamespace();
     marker.id = 0;
@@ -303,12 +388,12 @@ void MPCNode::pubFollowPath(double x, double y, double theta) {
     _pub_follow_path.publish(_hist_path);
 }
 
-std::vector<std::vector<double>> MPCNode::bezier_curve(double start_x, double start_y, double start_theta, double end_x, double end_y, double end_theta, int num_points) {
-    double distance = std::sqrt(std::pow(end_x - start_x, 2) + std::pow(end_y - start_y, 2));
-    double start_dx = distance * std::cos(start_theta);
-    double start_dy = distance * std::sin(start_theta);
-    double end_dx = distance * std::cos(end_theta);
-    double end_dy = distance * std::sin(end_theta);
+vector<vector<double>> MPCNode::bezier_curve(double start_x, double start_y, double start_theta, double end_x, double end_y, double end_theta, int num_points) {
+    double distance = sqrt(pow(end_x - start_x, 2) + pow(end_y - start_y, 2));
+    double start_dx = distance * cos(start_theta);
+    double start_dy = distance * sin(start_theta);
+    double end_dx = distance * cos(end_theta);
+    double end_dy = distance * sin(end_theta);
 
     double control_x1 = start_x + start_dx / 3;
     double control_y1 = start_y + start_dy / 3;
@@ -322,17 +407,17 @@ std::vector<std::vector<double>> MPCNode::bezier_curve(double start_x, double st
     // double control_y2 = end_y - end_slope * (end_x - control_x2);
 
 
-    std::vector<double> t(num_points);
+    vector<double> t(num_points);
     for (int i = 0; i < num_points; ++i) {
         t[i] = static_cast<double>(i) / (num_points - 1);
     }
 
-    std::vector<std::vector<double>> curve(num_points, std::vector<double>(2));
+    vector<vector<double>> curve(num_points, vector<double>(2));
     for (int i = 0; i < num_points; ++i) {
         double t_ = t[i];
         double one_minus_t = 1 - t_;
-        double one_minus_t_cubed = std::pow(one_minus_t, 3);
-        double t_cubed = std::pow(t_, 3);
+        double one_minus_t_cubed = pow(one_minus_t, 3);
+        double t_cubed = pow(t_, 3);
 
         curve[i][0] = one_minus_t_cubed * start_x + 3 * one_minus_t * one_minus_t * t_ * control_x1 + 3 * one_minus_t * t_ * t_ * control_x2 + t_cubed * end_x;
         curve[i][1] = one_minus_t_cubed * start_y + 3 * one_minus_t * one_minus_t * t_ * control_y1 + 3 * one_minus_t * t_ * t_ * control_y2 + t_cubed * end_y;
@@ -341,17 +426,17 @@ std::vector<std::vector<double>> MPCNode::bezier_curve(double start_x, double st
     return curve;
 }
 
-double MPCNode::calculate_heading_error(const std::vector<std::vector<double>>& curve, double start_theta, double end_theta, double l) {
-    std::vector<double> segment_lengths;
+double MPCNode::calculate_heading_error(const vector<vector<double>>& curve, double start_theta, double end_theta, double l) {
+    vector<double> segment_lengths;
     segment_lengths.reserve(curve.size() - 1);
     for (size_t i = 1; i < curve.size(); ++i) {
         double dx = curve[i][0] - curve[i - 1][0];
         double dy = curve[i][1] - curve[i - 1][1];
-        double length = std::sqrt(dx * dx + dy * dy);
+        double length = sqrt(dx * dx + dy * dy);
         segment_lengths.push_back(length);
     }
 
-    std::vector<double> accumulative_lengths;
+    vector<double> accumulative_lengths;
     accumulative_lengths.reserve(curve.size() - 1);
     double total_length = 0.0;
     for (double length : segment_lengths) {
@@ -364,7 +449,7 @@ double MPCNode::calculate_heading_error(const std::vector<std::vector<double>>& 
         ++index;
     }
 
-    std::vector<double> start_point(2);
+    vector<double> start_point(2);
     if (index == 0) {
         start_point = curve[0];
     } else {
@@ -379,7 +464,7 @@ double MPCNode::calculate_heading_error(const std::vector<std::vector<double>>& 
     double ex = start_point[0] + dx;
     double ey = start_point[1] + dy;
 
-    double tangent_heading_rad = std::atan2(dy, dx);
+    double tangent_heading_rad = atan2(dy, dx);
     double heading_error_rad = tangent_heading_rad - start_theta;
 
     if (heading_error_rad > M_PI) {
@@ -398,7 +483,7 @@ double MPCNode::calculate_heading_error(const std::vector<std::vector<double>>& 
     return heading_error_rad;
 }
 
-void MPCNode::publishBezierCurve(const std::vector<std::vector<double>>& bezierCurve)
+void MPCNode::publishBezierCurve(const vector<vector<double>>& bezierCurve)
 {
     nav_msgs::Path pathMsg;
     pathMsg.header.stamp = ros::Time::now();
@@ -445,7 +530,7 @@ void MPCNode::publishDesirePose(double x_des, double y_des, double theta_des) {
 
 void MPCNode::publishMPCTraj() {
     _mpc_traj = nav_msgs::Path();
-    _mpc_traj.header.frame_id = _car_frame; // points in car coordinate        
+    _mpc_traj.header.frame_id = _odom_frame; // points in car coordinate        
     _mpc_traj.header.stamp = ros::Time::now();
 
     geometry_msgs::PoseStamped tempPose;
@@ -465,6 +550,34 @@ void MPCNode::publishMPCTraj() {
             
         _mpc_traj.poses.push_back(tempPose); 
     }     
+
+    visualization_msgs::MarkerArray markerArray;
+    markerArray.markers.resize(_mpc_traj.poses.size());
+
+    for (int i = 0; i < _mpc_traj.poses.size(); i++)
+    {
+        const geometry_msgs::PoseStamped& poseStamped = _mpc_traj.poses[i];
+
+        visualization_msgs::Marker& marker = markerArray.markers[i];
+        marker.header.frame_id = _odom_frame;
+        marker.header.stamp = ros::Time::now();
+        marker.ns = "mpc_traj";
+        marker.id = i;
+        marker.type = visualization_msgs::Marker::CUBE;
+        marker.action = visualization_msgs::Marker::ADD;
+        marker.pose = poseStamped.pose;
+        marker.scale.x = 1.0;
+        marker.scale.y = 0.5;
+        marker.scale.z = 0.01;
+        marker.color.a = 0.3;
+        marker.color.r = 0.0;
+        marker.color.g = 0.8;
+        marker.color.b = 0.65;
+    }
+    _pub_mpctrajmarker.publish(markerArray);
+
+
+
     // publish the mpc trajectory
     _pub_mpctraj.publish(_mpc_traj);
 }
@@ -476,6 +589,7 @@ void MPCNode::followControlLoopCB(const ros::TimerEvent&)
         nav_msgs::Odometry odom = _odom; 
         nav_msgs::Path odom_path = _odom_path;   
         geometry_msgs::PoseStamped target_pos = _target_pose;
+        _mpc.init_states.clear();
         
         // ************************* update variables **************************************
 
@@ -493,6 +607,13 @@ void MPCNode::followControlLoopCB(const ros::TimerEvent&)
         const double dt = _dt;
         const double aF = (_speed - _pre_speed) / dt;       // acceleration
         const double dwF= (_w - _pre_w) / dt;               // delta of w
+        _mpc.init_states.push_back(xF);          // 更新全局位置
+        _mpc.init_states.push_back(yF);
+        _mpc.init_states.push_back(thetaF);
+        _mpc.init_states.push_back(vF);
+        _mpc.init_states.push_back(wF);
+        _mpc.init_states.push_back(aF);
+        _mpc.init_states.push_back(dwF);
 
         // update refrence car, odom frame
         const double xR = _xR;
@@ -524,14 +645,18 @@ void MPCNode::followControlLoopCB(const ros::TimerEvent&)
         const double x_des  = xR + cos(thetaR) * xd - sin(thetaR) * yd;
         const double y_des  = yR + sin(thetaR) * xd + cos(thetaR) * yd;
 
-        std::vector<std::vector<double>> bazierCurve = bezier_curve(xF, yF, thetaF, x_des, y_des, thetaR, 100);
+        vector<vector<double>> bazierCurve = bezier_curve(xF, yF, thetaF, x_des, y_des, thetaR, 100);
 
         const double eBazier = calculate_heading_error(bazierCurve, thetaF + M_PI, thetaR + M_PI, _l);
 
         // ************************* variabels at action time, in car frame, MPC init value *********************
-        const double xF_act = vF * dt;
-        const double yF_act = 0;
-        const double thetaF_act = wF * dt;
+        // const double xF_act = vF * dt;
+        // const double yF_act = 0;
+        // const double thetaF_act = wF * dt;
+        const double xF_act = xF + vF * cos(thetaF) * dt;
+        const double yF_act = yF + vF * sin(thetaF) * dt;
+        const double thetaF_act = thetaF + wF * dt;
+
         const double ev = cos(thetaE) * (vR - yd * wR) - xd * sin(thetaE) * wR - vF;
         const double ew = sin(thetaE) * (vR - yd * wR) + xd * cos(thetaE) * wR - _l * wF;
         const double xE_act = xE + (ev + yE * wF) * dt;
@@ -544,15 +669,7 @@ void MPCNode::followControlLoopCB(const ros::TimerEvent&)
             thetaE_act = eBazier - thetaF_act;
             publishBezierCurve(bazierCurve);
         }
-        
-        // if (thetaE_act > M_PI / 2)
-        // {
-        //     thetaE_act = M_PI / 2;
-        // }
-        // if (thetaE_act < - M_PI / 2) 
-        // {
-        //     thetaE_act = M_PI / 2;
-        // }
+
 
         // ******************************************* solve MPC *************************************************
         VectorXd target_params(10);
@@ -569,23 +686,23 @@ void MPCNode::followControlLoopCB(const ros::TimerEvent&)
         _w = mpc_results[1]; // acceleration
 
         if(_speed >= _max_speed) _speed = _max_speed;
-        if(_speed <= 0.0) _speed = 0.0;
+        // if(_speed <= 0.0) _speed = 0.0;
         if(_w >= _max_angvel) _w = _max_angvel;
         else if(_w <= - _max_angvel) _w = - _max_angvel;
 
         // ******************************************* Display & public ********************************************
-        if(_debug_info)
-        {
-        cout << "------------------- Debug ----------------------------" <<endl;
-        cout << "\t xE = \t" << xE << ", " << "\t yE = \t" << yE  << endl;
-        cout << "\t xR = \t" << xR << ", " << "\t yR = \t" << yR << "\t thetaR = \t" << thetaR << endl;
-        cout << "\t xF = \t" << xF << ", " << "\t yF = \t" << yF << "\t thetaF = \t" << thetaF << endl;
-        cout << "\t xd = \t" << xd << ", " << "\t yd = \t" << yd << endl;
-        cout << "\t x_des = \t" << x_des << ", " << "\t y_des = \t" << y_des << endl;
-        cout << "\t x_error = \t" << x_des - xF << ", " << "\t y_error = \t" << y_des - yF << "\t thetaE = \t" << thetaE << endl;
-        cout << "\t eBazier = \t" << eBazier << "\t temp_thetaR = \t" << temp_thetaR <<  endl;
-        cout << "\t vF = \t" << vF << "\t wF = \t" << wF <<  endl;
-        }
+        // if(_debug_info)
+        // {
+        // cout << "------------------- Debug ----------------------------" <<endl;
+        // cout << "\t xE = \t" << xE << ", " << "\t yE = \t" << yE  << endl;
+        // cout << "\t xR = \t" << xR << ", " << "\t yR = \t" << yR << "\t thetaR = \t" << thetaR << endl;
+        // cout << "\t xF = \t" << xF << ", " << "\t yF = \t" << yF << "\t thetaF = \t" << thetaF << endl;
+        // cout << "\t xd = \t" << xd << ", " << "\t yd = \t" << yd << endl;
+        // cout << "\t x_des = \t" << x_des << ", " << "\t y_des = \t" << y_des << endl;
+        // cout << "\t x_error = \t" << x_des - xF << ", " << "\t y_error = \t" << y_des - yF << "\t thetaE = \t" << thetaE << endl;
+        // cout << "\t eBazier = \t" << eBazier << "\t temp_thetaR = \t" << temp_thetaR <<  endl;
+        // cout << "\t vF = \t" << vF << "\t wF = \t" << wF <<  endl;
+        // }
 
         publishMPCTraj();
         publishDesirePose(x_des, y_des, thetaR);
