@@ -26,7 +26,7 @@ def points_to_marker_array(points):
         marker.action = Marker.ADD
         marker.pose.position.x = point[0]
         marker.pose.position.y = point[1]
-        marker.pose.position.z = 0
+        marker.pose.position.z = 0.5
         marker.scale.x = 0.3
         marker.scale.y = 0.3
         marker.scale.z = 1.0

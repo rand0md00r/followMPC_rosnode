@@ -2,6 +2,7 @@
 #include <iostream>
 #include <map>
 #include <math.h>
+#include <cmath>
 #include "ros/ros.h"
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
 #include <geometry_msgs/PoseStamped.h>
@@ -23,6 +24,9 @@
 using namespace std;
 using namespace Eigen;
 
+const double DMBE_MAX_LENGTH_A = 1.5;
+const double DMBE_MAX_LENGTH_B = 0.5;
+
 /********************/
 /* CLASS DEFINITION */
 /********************/
@@ -36,6 +40,7 @@ class MPCNode
         ros::NodeHandle _nh;
         ros::Subscriber _sub_odom, _sub_target, _sub_marker;
         ros::Publisher _pub_twist, _pub_mpctraj, _pub_target_prediction, _pub_follow_path, _pub_bazier_path, _pub_desire_pose, _pub_desirePointPath, _pub_mpctrajmarker;
+        ros::Publisher _pub_dmbe;
         ros::Timer _timer1;
         tf::TransformListener _tf_listener;
         ros::Time tracking_stime;
@@ -88,6 +93,9 @@ class MPCNode
         void publishBezierCurve(const vector<vector<double>>& bezierCurve);
         void publishDesirePose(double x_des, double y_des, double theta_des);
         void publishMPCTraj();
+        void publishDMBE();
+        vector<vector<double>> get_dmbe(const vector<vector<double>>& cur_ob);
+        void get_v_theta(vector<vector<double>>& cur_ob);
 }; // end of class
 
 MPCNode::MPCNode()
@@ -141,6 +149,7 @@ MPCNode::MPCNode()
     _pub_bazier_path = _nh.advertise<nav_msgs::Path>("/bazier_path",1);
     _pub_desire_pose = _nh.advertise<geometry_msgs::PoseStamped>("/desire_pose", 1);
     _pub_desirePointPath = _nh.advertise<nav_msgs::Path>("/desire_pose_path", 1);
+    _pub_dmbe = _nh.advertise<visualization_msgs::MarkerArray>("/dmbe", 1);
 
     ros::Duration(0.5).sleep(); //等待接受目标信息
     _timer1 = _nh.createTimer(ros::Duration((1.0)/_controller_freq), &MPCNode::followControlLoopCB, this); // 10Hz
@@ -255,10 +264,10 @@ vector<vector<double>> linear_interpolation(vector<vector<double>> trajectory, d
     int num_samples = static_cast<int>(3.2 / sampling_time) + 1;
 
     // Initialize the interpolated trajectory sequence
-    vector<vector<double>> interpolated_trajectory(num_samples, vector<double>(2, 0.0));
+    vector<vector<double>> interpolated_trajectory(num_samples+1, vector<double>(2, 0.0));
 
     // Linear interpolation
-    for (int i = 0; i < num_samples; ++i) {
+    for (int i = 0; i < num_samples+1; ++i) {
         double t = i * sampling_time;
 
         // Find the trajectory segment corresponding to the current time
@@ -274,19 +283,57 @@ vector<vector<double>> linear_interpolation(vector<vector<double>> trajectory, d
         interpolated_trajectory[i][1] = beta * trajectory[segment][1] + alpha * trajectory[segment + 1][1];
     }
 
+    interpolated_trajectory.pop_back();
+    interpolated_trajectory.pop_back();
+
     return interpolated_trajectory;
 }
 
+
+vector<vector<double>> MPCNode::get_dmbe(const vector<vector<double>>& cur_ob){
+    // cur_ob:(Xob, Yob, v, theta)
+    vector<vector<double>> dmbe;
+
+    double alpha = 2.0;
+    for(int i = 0; i < cur_ob.size(); i++){
+        double a = DMBE_MAX_LENGTH_A / (1 + std::exp(-alpha * (cur_ob[i][2])));
+        double b = DMBE_MAX_LENGTH_B;
+        double phi = cur_ob[i][3];
+        double h = cur_ob[i][0] - cos(phi) * sqrt(a * a - b * b);
+        double k = cur_ob[i][1] - sin(phi) * sqrt(a * a - b * b);
+
+        dmbe.push_back({h, k, a, b, phi});
+    }
+
+    return dmbe;
+}
+
+
+void MPCNode::get_v_theta(vector<vector<double>>& cur_ob){
+    // 计算每个位置之间的线速度v和方向theta
+    for (int i = 0; i < cur_ob.size() - 1; ++i) {
+        double delta_x = cur_ob[i][0] - cur_ob[i + 1][0];
+        double delta_y = cur_ob[i][1] - cur_ob[i + 1][1];
+        double v = sqrt(delta_x * delta_x + delta_y * delta_y);
+        double theta = atan2(delta_y, delta_x);
+        cur_ob[i].push_back(v);       // v
+        cur_ob[i].push_back(theta);
+    }
+    cur_ob.pop_back();
+}
 
 
 void MPCNode::markerCB(const visualization_msgs::MarkerArray::ConstPtr &targetMsg) {
     // 障碍物预测轨迹的回调函数
 
-    _mpc.obs.clear();
+    _mpc.all_obs.clear();
+    _mpc.all_dmbe.clear();
     double min_dist = std::numeric_limits<double>::max();
+    
+    // 获得全部障碍物轨迹
 
     for (auto it = targetMsg->markers.begin(); it != targetMsg->markers.end(); ++it) {
-        // cur_ob 包含8个预测点，每个预测点包含5个参数（Xob, Yob, a, b, theta）
+        // cur_ob 包含8个预测点，每个预测点包含5个参数（Xob, Yob, v, theta）
         vector<vector<double>> cur_ob;
         
         for(auto pt = it->points.begin(); pt != it->points.end(); ++pt) {
@@ -297,37 +344,33 @@ void MPCNode::markerCB(const visualization_msgs::MarkerArray::ConstPtr &targetMs
             cur_ob.push_back(cur_pt);
         }
 
-        cur_ob = linear_interpolation(cur_ob, 0.1);
-
-        // 计算每个位置之间的线速度v和方向theta
-        for (int i = 0; i < cur_ob.size(); ++i) {
-            double delta_x = cur_ob[i][0] - cur_ob[(i + 1) % cur_ob.size()][0];
-            double delta_y = cur_ob[i][1] - cur_ob[(i + 1) % cur_ob.size()][1];
-            double v = sqrt(delta_x * delta_x + delta_y * delta_y);
-            double theta = atan2(delta_y, delta_x);
-
-            // cur_ob[i].push_back(v);   // v for a
-            cur_ob[i].push_back(1.0);       // 暂时用圆形代替
-            cur_ob[i].push_back(1.0); // 1.0 for b
-            cur_ob[i].push_back(theta);
-        }
-        _mpc.obs.push_back(cur_ob);
-
         // 记录距离最近的障碍物
-
-        if(_mpc.init_states.empty()) {
-            cout << "init states is empty" << endl;
-            return;
-        }
+        if(_mpc.init_states.empty()) { return; }
         double dx = it->points[0].x - _mpc.init_states[0];
         double dy = it->points[0].y - _mpc.init_states[1];
         double cur_dist = dx * dx + dy * dy;
-        
+
         if(cur_dist < min_dist){
             min_dist = cur_dist;
-            _mpc.ob = cur_ob;
+            vector<vector<double>> cur_ob_interpolation = linear_interpolation(cur_ob, 0.1);
+            get_v_theta(cur_ob_interpolation);          // 对障碍物添加线速度和方向
+            _mpc.min_dmbe = get_dmbe(cur_ob_interpolation);
+            _mpc.ob = cur_ob_interpolation;
         }
+
+        _mpc.all_obs.push_back(cur_ob);
     }
+
+    // 对所有障碍物计算dmbe
+    for(int i = 0; i < _mpc.all_obs.size(); ++i){
+        vector<vector<double>> cur_ob = _mpc.all_obs[i];
+        get_v_theta(cur_ob);
+        vector<vector<double>> cur_dmbe = get_dmbe(cur_ob);
+        _mpc.all_dmbe.push_back(cur_dmbe);
+    }
+
+    // viz DMBE; 
+    publishDMBE();
 }
 
 void MPCNode::pubTargetPrediction(const VectorXd& target_params) {
@@ -503,6 +546,60 @@ void MPCNode::publishBezierCurve(const vector<vector<double>>& bezierCurve)
     _pub_bazier_path.publish(pathMsg);
 }
 
+void MPCNode::publishDMBE(){
+    if(_mpc.all_dmbe.empty()) return;
+    visualization_msgs::MarkerArray ellipse_vis;
+
+    vector<vector<vector<double>>> all_dmbe = _mpc.all_dmbe;
+    // obs location
+    // cout << "obs location" << endl;
+    // for(int i = 0; i < _mpc.all_obs.size(); ++i){
+    //     for(auto it : _mpc.all_obs[i]){
+    //         cout << "[" << it[0] << ", " << it[1] << "]," << endl;
+    //     }
+    //     cout << endl;
+    // }
+    // cout << "dmbe" << endl;
+    // for(int i = 0; i < _mpc.all_dmbe.size(); ++i){
+    //     for(auto it : _mpc.all_dmbe[i]){
+    //         cout << "[" << it[0] << ", " << it[1] << ", " << it[2] << ", " << it[3] << ", " << it[4] << "]," << endl;
+    //     }
+    //     cout << endl;
+    // }
+
+    for(size_t i = 0; i < all_dmbe.size(); ++i){
+        // dmbe:[[h0, k0, a0, b0, phi0], [h1, k1, a1, b1, phi1], ... , [ht, kt, at, bt, phit]]
+        for(size_t j = 0; j < all_dmbe[i].size(); ++j){
+            visualization_msgs::Marker Marker;
+            Marker.header.frame_id = _odom_frame;
+            Marker.header.stamp = ros::Time::now();
+            Marker.ns = "ellipse";
+            Marker.type = visualization_msgs::Marker::CYLINDER;
+            Marker.action = visualization_msgs::Marker::ADD;
+            Marker.lifetime = ros::Duration(0.45);
+            Marker.id = j + i * (all_dmbe.size() * 2);
+            Marker.pose.orientation.x = 0.0;
+            Marker.pose.orientation.y = 0.0;
+            Marker.pose.orientation.z = sin(all_dmbe[i][j][4] / 2.0);
+            Marker.pose.orientation.w = cos(all_dmbe[i][j][4] / 2.0);
+            Marker.pose.position.x = all_dmbe[i][j][0];
+            Marker.pose.position.y = all_dmbe[i][j][1];
+            Marker.pose.position.z = 0.25;
+            Marker.scale.x = all_dmbe[i][j][2] * 2;
+            Marker.scale.y = all_dmbe[i][j][3] * 2;
+            Marker.scale.z = 0.5;
+            Marker.color.a = 0.3;
+            Marker.color.r = 1.0;
+            Marker.color.g = 0.0;
+            Marker.color.b = 0.0;
+
+            ellipse_vis.markers.push_back(Marker);
+        }
+        
+    }
+    _pub_dmbe.publish(ellipse_vis);
+}
+
 void MPCNode::publishDesirePose(double x_des, double y_des, double theta_des) {
     geometry_msgs::PoseStamped desired_pose;
 
@@ -607,13 +704,7 @@ void MPCNode::followControlLoopCB(const ros::TimerEvent&)
         const double dt = _dt;
         const double aF = (_speed - _pre_speed) / dt;       // acceleration
         const double dwF= (_w - _pre_w) / dt;               // delta of w
-        _mpc.init_states.push_back(xF);          // 更新全局位置
-        _mpc.init_states.push_back(yF);
-        _mpc.init_states.push_back(thetaF);
-        _mpc.init_states.push_back(vF);
-        _mpc.init_states.push_back(wF);
-        _mpc.init_states.push_back(aF);
-        _mpc.init_states.push_back(dwF);
+        _mpc.init_states = {xF, yF, thetaF, vF, wF, aF, dwF};
 
         // update refrence car, odom frame
         const double xR = _xR;

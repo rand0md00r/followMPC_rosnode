@@ -35,8 +35,10 @@ class MPC
         vector<double> mpc_y;
         vector<double> mpc_theta;
 
-        vector<vector<vector<double>>> obs;
-        vector<vector<double>> ob;
+        vector<vector<vector<double>>> all_obs;     // 场景中所有障碍物的稀疏轨迹
+        vector<vector<vector<double>>> all_dmbe;    // 场景中所有障碍物的稀疏轨迹的dmbe
+        vector<vector<double>> ob;          // 稠密轨迹，用于mpc。[x,y,v,theta]
+        vector<vector<double>> min_dmbe;    // 稠密轨迹的dmbe。[h,k,a,b,phi]
         vector<double> init_states; // (x, y, theta, v, w, a, dw)
 
         void LoadParams(const std::map<string, double> &params);
