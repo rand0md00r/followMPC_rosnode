@@ -1,0 +1,25 @@
+<launch>
+    <arg name="trajectory_type" default="infinity" doc="opt: line, circle, infinity, rectangle, epitrochoid"/>
+
+    <!-- 定义静态坐标变换 -->
+    <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="base_2_os" args="0 0 0 0 0 0 1 body_fast os_sensor" /> -->
+
+    <!--  ************** Target point generation **************  -->
+    <node name="mpc_trajectory_generation" pkg="mpc_ros" type="dynamic_point_publisher.py">
+        <param name="trajectory_type" value="$(arg trajectory_type)"/>
+    </node>
+    <!-- <node name="mpc_trajectory_generation" pkg="mpc_ros" type="gen_rounded_rectangle.py" if="$(eval trajectory_type == 'rectangle')">
+    </node> -->
+
+    <!--  ************** MPC Node **************  -->
+    <node name="MPC_tracking" pkg="mpc_ros" type="follow_mpc" output="screen" >
+        <rosparam file="$(find mpc_ros)/params/section_5_test.yaml" command="load" />
+    </node>
+
+    <!--  ************** Visualisation **************  -->
+    <!-- <node name="rviz" pkg="rviz" type="rviz" args="-d $(find mpc_ros)/rviz/rviz_target_track.rviz"/> -->
+
+    <!--  ************** Error Graph **************  -->
+    <!-- <node name="drawError" pkg="mpc_ros" type="drawError.py" output="screen"/> -->
+
+</launch>

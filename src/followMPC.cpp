@@ -40,7 +40,7 @@ AD<double> h_pure_dist(vector<AD<double>> curpos_, vector<AD<double>> dmbe_){
     center_vec[0] = curpos_[0] - ob_vec[0];
     center_vec[1] = curpos_[1] - ob_vec[1];
 
-    AD<double>  dist = sqrt(center_vec[0]*center_vec[0] + center_vec[1]*center_vec[1]) - 0.5;
+    AD<double>  dist = sqrt(center_vec[0]*center_vec[0] + center_vec[1]*center_vec[1]) - 1.0;
     return dist;
 }
 
@@ -145,10 +145,6 @@ class FG_eval
                 cost_vel += _w_vel * CppAD::pow(vars[_v_start + i], 2);
                 cost_angvel += _w_angvel * CppAD::pow(vars[_angvel_start + i], 2);
             }
-            // cout << "--- costs   ---" <<endl;
-            // cout << "ex: " << cost_ex << ", \t etheta:" << cost_etheta << endl;
-            // cout << "vel:" << cost_vel << ", \t angvel:" << cost_angvel << endl;
-
             // 角速度、加速度变化惩罚
             for (int i = 0; i < _mpc_steps - 2; i++) {
               fg[0] += _w_angvel_d * CppAD::pow(vars[_angvel_start + i + 1] - vars[_angvel_start + i], 2);
@@ -157,10 +153,8 @@ class FG_eval
               cost_angvel_d += _w_angvel_d * CppAD::pow(vars[_angvel_start + i + 1] - vars[_angvel_start + i], 2);
               cost_vel_d += _w_vel_d * CppAD::pow(vars[_v_start + i + 1] - vars[_v_start + i], 2);
             }
-            // cout << "cost_vel_d, : " << cost_vel_d << ", \t _w_vel_d:" << _w_vel_d << endl;
             
             // fg[x] 约束
-            // Initial constraints
             // 加载与目标相关参数 t时刻
             AD<double> xR0 = _target_params[0];
             AD<double> yR0 = _target_params[1];
@@ -245,8 +239,6 @@ class FG_eval
                 else {
                     fg[2 + _cbf_start + i] = 1.0e19;
                 }
-
-
                 thetaR0 = thetaR0 + wR0 * _dt;
                 vR0 = vR0 + aR * _dt;
 
@@ -261,13 +253,14 @@ class FG_eval
             }
 
             // // Print fg values
-            for (int i = _cbf_start; i < _cbf_start + _mpc_steps; ++i) {
-                cout << "fg[" << i << "]: " << fg[i] << ", ";
-                if ((i + 1) % 5 == 0) {
-                    cout << endl;
-                }
-            }
-            cout << endl;
+            // cout << "dmbe fg val:" << endl;
+            // for (int i = _cbf_start; i < _cbf_start + _mpc_steps; ++i) {
+            //     cout << "fg[" << i << "]: " << fg[i] << ", ";
+            //     if ((i + 1) % 5 == 0) {
+            //         cout << endl;
+            //     }
+            // }
+            // cout << endl;
         }
 };
 
