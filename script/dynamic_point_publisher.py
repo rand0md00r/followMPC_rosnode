@@ -41,7 +41,7 @@ def generate_trajectory(trajectory_type):
         return calculate_pose
 
     if trajectory_type == "infinity":
-        angular_speed = 0.05
+        angular_speed = 0.1
         center_x = -6
         center_y = 2
 
@@ -49,7 +49,7 @@ def generate_trajectory(trajectory_type):
             theta = angular_speed * time
             pose_msg = PoseStamped()
             pose_msg.header.stamp = rospy.Time.now()
-            pose_msg.header.frame_id = "odom"
+            pose_msg.header.frame_id = "camera_init"
             pose_msg.pose.position.x = 5 * cos(theta) / (sin(theta) ** 2 + 1) + center_x
             pose_msg.pose.position.y = 5 * sin(theta) * cos(theta) / (sin(theta) ** 2 + 1) + center_y
             dx = 5 * cos(theta + angular_speed * 0.1) / (sin(theta + angular_speed * 0.1) ** 2 + 1) + center_x - pose_msg.pose.position.x + 1e-5
@@ -76,7 +76,7 @@ def generate_trajectory(trajectory_type):
             theta = angular_speed * time
             pose_msg = PoseStamped()
             pose_msg.header.stamp = rospy.Time.now()
-            pose_msg.header.frame_id = "odom"
+            pose_msg.header.frame_id = "camera_init"
             pose_msg.pose.position.x = scale_factor * ((R + r) * cos(theta) - d * cos(((R + r) / r) * theta))
             pose_msg.pose.position.y = scale_factor * ((R + r) * sin(theta) - d * sin(((R + r) / r) * theta))
             next_theta = theta + angular_speed * 0.1
@@ -98,10 +98,10 @@ def generate_trajectory(trajectory_type):
         return calculate_pose
 
     if trajectory_type == "line":
-        start_x = -3.0
-        start_y = 1.0
+        start_x = 1.0
+        start_y = 0.0
         velocity = 0.5
-        distance = 6.0
+        distance = 20.0
 
         def calculate_pose(time):
             x = start_x + velocity * time
@@ -111,7 +111,7 @@ def generate_trajectory(trajectory_type):
             theta = 0.0  # 设置朝向为0
             pose_msg = PoseStamped()
             pose_msg.header.stamp = rospy.Time.now()
-            pose_msg.header.frame_id = "odom"
+            pose_msg.header.frame_id = "camera_init"
             pose_msg.pose.position.x = x
             pose_msg.pose.position.y = y
             pose_msg.pose.position.z = 0.0
@@ -130,7 +130,7 @@ def generate_trajectory(trajectory_type):
 def publish_dynamic_point():
     rospy.init_node('dynamic_point_publisher', anonymous=True)
     trajectory_type = rospy.get_param('~trajectory_type')
-    # trajectory_type = "infinity"
+    # trajectory_type = "epitrochoid"
     print(trajectory_type)
     rate = rospy.Rate(10)  # 发布频率为10Hz
 
@@ -140,7 +140,7 @@ def publish_dynamic_point():
     target_path_pub = rospy.Publisher('/target_point/path', PoseArray, queue_size=10)
 
     time = 0.0  # 初始时间
-    frame = "odom"
+    frame = "Odometry_fast_lio"
 
     target_path_msg = PoseArray()
     target_path_msg.header.frame_id = frame

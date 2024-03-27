@@ -1,0 +1,34 @@
+# topics & frames
+target_topic    : "/target_point/pose"
+odom_topic      : "/Odometry_fast_lio"              # defalut： /odom
+desirePos_topic : "/desire_pose"        # optional
+marker_topic    : "/traj_pred_node/predictions"     # outdoor test target topic
+
+global_frame    : "camera_init"
+car_frame       : "os_sensor"
+
+# ControlLoop params
+thread_numbers  : 2
+pub_twist_cmd   : true
+debug_info      : false
+max_speed       : 1.0
+controller_freq : 10
+lenth_hand      : 0.5         # 手端模型距离, default: 0.5m
+distance_in_queue: 100.0        # use bazier when out of queue
+
+# Parameter for MPC solver
+target_distance : 1.5
+target_alpha    : 3.14
+mpc_steps       : 20.0
+mpc_max_angvel  : 3
+# mpc_max_throttle: 1.0
+mpc_bound_value : 1.0e6
+
+# Wight params
+mpc_w_ex        : 1000000.0           # 纵向误差
+mpc_w_etheta    : 100.0            # 航向误差
+mpc_w_vel       : 0.0              # 目标速度误差
+mpc_w_vel_d     : 0.0             # 速度变化惩罚
+
+mpc_w_angvel    : 0.0            # 角速度惩罚
+mpc_w_angvel_d  : 10000.0         # 角速度变化惩罚

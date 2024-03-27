@@ -9,33 +9,38 @@
 
 using CppAD::AD;
 
-AD<double> h(vector<AD<double>> curpos_, vector<AD<double>> ob_){
-    float safe_dist = 0.5;
+AD<double> h(vector<AD<double>> curpos_, vector<AD<double>> dmbe_, vector<AD<double>> ob_){
+    // dmbe_ : [x, y, a, b, phi]
+    float safe_dist = 0.2;
 
-    AD<double>  c = CppAD::cos(ob_[4]);
-    AD<double>  s = CppAD::sin(ob_[4]);
-    AD<double>  a = ob_[2];
-    AD<double>  b = ob_[3];
+    AD<double>  a = dmbe_[2];
+    AD<double>  b = dmbe_[3];
+    AD<double>  c = CppAD::cos(dmbe_[4]);
+    AD<double>  s = CppAD::sin(dmbe_[4]);
 
-    vector<AD<double> > ob_vec = {ob_[0], ob_[1]};
-    vector<AD<double> > center_vec(2);
-    center_vec[0] = curpos_[0] - ob_vec[0];
-    center_vec[1] = curpos_[1] - ob_vec[1];
+    AD<double> dx = curpos_[0] - dmbe_[0];
+    AD<double> dy = curpos_[1] - dmbe_[1];
+    AD<double> dist = CppAD::sqrt(dx*dx + dy*dy);
+    AD<double> delta = CppAD::atan2(dy, dx);
 
-    AD<double>  dist = b * (
-        sqrt( ((c*c) / (a*a) + (s*s) / (b*b)) * (center_vec[0]*center_vec[0]) + ((s*s) / (a*a) + (c*c) / (b*b)) *
-        (center_vec[1]*center_vec[1]) + 2*c*s*(1 / (a*a) - 1 / (b*b)) * center_vec[0] * center_vec[1]) - 1) - safe_dist;
-    
-    return dist;
+    AD<double> ell_x = a * CppAD::cos(delta) * c - b * CppAD::sin(delta) * s + dmbe_[0];
+    AD<double> ell_y = a * CppAD::cos(delta) * s + b * CppAD::sin(delta) * c + dmbe_[1];
+
+    AD<double> c_x = ob_[0];
+    AD<double> c_y = ob_[1];
+
+    AD<double>  dist_ell_c = sqrt((c_x - ell_x) * (c_x - ell_x) + (c_y - ell_y) * (c_y - ell_y));
+
+    return dist - dist_ell_c - safe_dist;
 }
 
-AD<double> h_pure_dist(vector<AD<double>> curpos_, vector<AD<double>> ob_){
-    vector<AD<double> > ob_vec = {ob_[0], ob_[1]};
+AD<double> h_pure_dist(vector<AD<double>> curpos_, vector<AD<double>> dmbe_){
+    vector<AD<double> > ob_vec = {dmbe_[0], dmbe_[1]};
     vector<AD<double> > center_vec(2);
     center_vec[0] = curpos_[0] - ob_vec[0];
     center_vec[1] = curpos_[1] - ob_vec[1];
 
-    AD<double>  dist = sqrt(center_vec[0]*center_vec[0] + center_vec[1]*center_vec[1]) - 0.5;
+    AD<double>  dist = sqrt(center_vec[0]*center_vec[0] + center_vec[1]*center_vec[1]) - 1.0;
     return dist;
 }
 
@@ -52,7 +57,8 @@ class FG_eval
         Eigen::VectorXd _target_params;
         AD<double> cost_ex, cost_ey, cost_vel, cost_etheta, cost_angvel,cost_angvel_d, cost_vel_d;
 
-        vector<vector<double>> _ob;
+        vector<vector<double>> _min_dmbe;
+        vector<vector<double>> _min_ob;
         vector<double> _cur_state;
         float gamma_k;
 
@@ -85,11 +91,11 @@ class FG_eval
             _angvel_start    = _v_start + _mpc_steps - 1;
             _cbf_start = _angvel_start + _mpc_steps;
 
-            gamma_k = 1.0;
+            gamma_k = 0.3;
         }
 
         // Load parameters for constraints
-        void LoadParams(const std::map<string, double> &params, Eigen::VectorXd target_params, const vector<vector<double>>& ob, const vector<double>& init_state)
+        void LoadParams(const std::map<string, double> &params, Eigen::VectorXd target_params, const vector<vector<double>>& min_dmbe, const vector<vector<double>>& min_ob, const vector<double>& init_state)
         {
             _target_params = target_params;
             _dt = params.find("DT") != params.end() ? params.at("DT") : _dt;
@@ -106,7 +112,8 @@ class FG_eval
 
             _ref_vel = _target_params[3];   // 动点速度
 
-            _ob = ob;
+            _min_dmbe = min_dmbe;
+            _min_ob = min_ob;
             _cur_state = init_state;
 
         }
@@ -138,10 +145,6 @@ class FG_eval
                 cost_vel += _w_vel * CppAD::pow(vars[_v_start + i], 2);
                 cost_angvel += _w_angvel * CppAD::pow(vars[_angvel_start + i], 2);
             }
-            // cout << "--- costs   ---" <<endl;
-            // cout << "ex: " << cost_ex << ", \t etheta:" << cost_etheta << endl;
-            // cout << "vel:" << cost_vel << ", \t angvel:" << cost_angvel << endl;
-
             // 角速度、加速度变化惩罚
             for (int i = 0; i < _mpc_steps - 2; i++) {
               fg[0] += _w_angvel_d * CppAD::pow(vars[_angvel_start + i + 1] - vars[_angvel_start + i], 2);
@@ -150,10 +153,8 @@ class FG_eval
               cost_angvel_d += _w_angvel_d * CppAD::pow(vars[_angvel_start + i + 1] - vars[_angvel_start + i], 2);
               cost_vel_d += _w_vel_d * CppAD::pow(vars[_v_start + i + 1] - vars[_v_start + i], 2);
             }
-            // cout << "cost_vel_d, : " << cost_vel_d << ", \t _w_vel_d:" << _w_vel_d << endl;
             
             // fg[x] 约束
-            // Initial constraints
             // 加载与目标相关参数 t时刻
             AD<double> xR0 = _target_params[0];
             AD<double> yR0 = _target_params[1];
@@ -176,16 +177,20 @@ class FG_eval
             
             // cbf约束
 
-            if(!_ob.empty()){
+            if(!_min_dmbe.empty()){
 
-                vector<AD<double>> ob_1 = {_ob[1][0], _ob[1][1], _ob[1][2], _ob[1][3], _ob[1][4]};
-                vector<AD<double>> ob_0 = {_ob[0][0], _ob[0][1], _ob[0][2], _ob[0][3], _ob[0][4]};
-                AD<double> h1 = h_pure_dist({vars[_x_start + 1], vars[_y_start + 1]}, ob_1);
-                AD<double> h0 = h_pure_dist({vars[_x_start], vars[_y_start]}, ob_0);
+                vector<AD<double>> dmbe_1 = {_min_dmbe[1][0], _min_dmbe[1][1], _min_dmbe[1][2], _min_dmbe[1][3], _min_dmbe[1][4]};
+                vector<AD<double>> dmbe_0 = {_min_dmbe[0][0], _min_dmbe[0][1], _min_dmbe[0][2], _min_dmbe[0][3], _min_dmbe[0][4]};
+                vector<AD<double>> ob_1 = {_min_ob[1][0], _min_ob[1][1]};
+                vector<AD<double>> ob_0 = {_min_ob[0][0], _min_ob[0][1]};
+
+                AD<double> h1 = h({vars[_x_start + 1], vars[_y_start + 1]}, dmbe_1, ob_1);
+                AD<double> h0 = h({vars[_x_start], vars[_y_start]}, dmbe_0, ob_0);
+
                 fg[1 + _cbf_start] = h1 - (1 - gamma_k) * h0;
-            } 
+            }
             else {
-                cout << "obstacle location have not been received" << endl;
+                cout << "trajectoty prediction have not been received" << endl;
                 fg[1 + _cbf_start] = 1.0e19;
             }
 
@@ -220,18 +225,20 @@ class FG_eval
                 fg[2 + _etheta_start + i]= thetaE1 - (thetaE0 + (wR0 - w0) * _dt);
 
                 // cbf 约束
-                if(!_ob.empty()){
-                    vector<AD<double>> ob_next = {_ob[i + 1][0], _ob[i + 1][1], _ob[i + 1][2], _ob[i + 1][3], _ob[i + 1][4]};
-                    vector<AD<double>> ob_cur = {_ob[i][0], _ob[i][1], _ob[i][2], _ob[i][3], _ob[i][4]};
-                    AD<double> h_next = h_pure_dist({vars[_x_start + i + 1], vars[_y_start + i + 1]}, ob_next);
-                    AD<double> h_cur = h_pure_dist({vars[_x_start + i], vars[_y_start + i]}, ob_cur);
+                if(!_min_dmbe.empty()){
+                    vector<AD<double>> dmbe_next = {_min_dmbe[i + 1][0], _min_dmbe[i + 1][1], _min_dmbe[i + 1][2], _min_dmbe[i + 1][3], _min_dmbe[i + 1][4]};
+                    vector<AD<double>> dmbe_cur = {_min_dmbe[i][0], _min_dmbe[i][1], _min_dmbe[i][2], _min_dmbe[i][3], _min_dmbe[i][4]};
+                    vector<AD<double>> ob_next = {_min_ob[i + 1][0], _min_ob[i + 1][1]};
+                    vector<AD<double>> ob_cur = {_min_ob[i][0], _min_ob[i][1]};
+                    // AD<double> h_next = h_pure_dist({vars[_x_start + i + 1], vars[_y_start + i + 1]}, dmbe_next);
+                    // AD<double> h_cur = h_pure_dist({vars[_x_start + i], vars[_y_start + i]}, dmbe_cur);
+                    AD<double> h_next = h({vars[_x_start + i + 1], vars[_y_start + i + 1]}, dmbe_next, ob_next);
+                    AD<double> h_cur = h({vars[_x_start + i], vars[_y_start + i]}, dmbe_cur, ob_cur);
                     fg[2 + _cbf_start + i]   = h_next - (1 - gamma_k) * h_cur;
-                } 
+                }
                 else {
                     fg[2 + _cbf_start + i] = 1.0e19;
                 }
-
-
                 thetaR0 = thetaR0 + wR0 * _dt;
                 vR0 = vR0 + aR * _dt;
 
@@ -245,14 +252,15 @@ class FG_eval
                 // fg[1 + _angvel_start + i]= w0 + dw0 * _dt;
             }
 
-            // Print fg values
-            for (int i = _cbf_start; i < _cbf_start + _mpc_steps; ++i) {
-                cout << "fg[" << i << "]: " << fg[i] << ", ";
-                if ((i + 1) % 5 == 0) {
-                    cout << endl;
-                }
-            }
-            cout << endl;
+            // // Print fg values
+            // cout << "dmbe fg val:" << endl;
+            // for (int i = _cbf_start; i < _cbf_start + _mpc_steps; ++i) {
+            //     cout << "fg[" << i << "]: " << fg[i] << ", ";
+            //     if ((i + 1) % 5 == 0) {
+            //         cout << endl;
+            //     }
+            // }
+            // cout << endl;
         }
 };
 
@@ -387,7 +395,7 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd target_params)
 
     // 计算目标和约束的对象
     FG_eval fg_eval;
-    fg_eval.LoadParams(_params, target_params, ob, init_states);
+    fg_eval.LoadParams(_params, target_params, min_dmbe, ob, init_states);
 
     // options for IPOPT solver
     std::string options;

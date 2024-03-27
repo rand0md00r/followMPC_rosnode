@@ -2,6 +2,7 @@
 #include <iostream>
 #include <map>
 #include <math.h>
+#include <cmath>
 #include "ros/ros.h"
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
 #include <geometry_msgs/PoseStamped.h>
@@ -23,6 +24,9 @@
 using namespace std;
 using namespace Eigen;
 
+const double DMBE_MAX_LENGTH_A = 1.9;
+const double DMBE_MAX_LENGTH_B = 0.7;
+
 /********************/
 /* CLASS DEFINITION */
 /********************/
@@ -34,8 +38,9 @@ class MPCNode
         
     private:
         ros::NodeHandle _nh;
-        ros::Subscriber _sub_odom, _sub_target, _sub_marker;
+        ros::Subscriber _sub_odom, _sub_target, _sub_marker, _sub_vel, _sub_ar;
         ros::Publisher _pub_twist, _pub_mpctraj, _pub_target_prediction, _pub_follow_path, _pub_bazier_path, _pub_desire_pose, _pub_desirePointPath, _pub_mpctrajmarker;
+        ros::Publisher _pub_dmbe, _pub_ar_target;
         ros::Timer _timer1;
         tf::TransformListener _tf_listener;
         ros::Time tracking_stime;
@@ -43,6 +48,7 @@ class MPCNode
         ros::Time tracking_time;
         int tracking_time_sec;
         int tracking_time_nsec;
+        tf::TransformListener listener;
         
         //time flag
         bool start_timef = false;
@@ -56,7 +62,7 @@ class MPCNode
         visualization_msgs::Marker _marker_pose, _pre_marker_pose;
         ros::Time _prev_time = ros::Time::now();
 
-        string _odom_topic, _target_topic, _marker_topic;
+        string _odom_topic, _target_topic, _marker_topic, _vel_odom_topic;
         string _map_frame, _odom_frame, _car_frame;
 
         MPC _mpc;   // MPC类实例化
@@ -68,26 +74,33 @@ class MPCNode
                _distance, _alpha;
 
         // 声明控制回环变量
+        double _v_odom, _w_odom, _pre_v_odom, _pre_w_odom;
         double _vR, _wR, _thetaR, _vF, _wF, _aF, _thetaF, _xE, _yE, _xR, _yR, _aR, _prev_vx, _prev_vy, _l;
-        double _dt, _w, _speed, _pre_speed, _pre_w, _max_speed, _distance_in_queue;
+        double _dt, _w, _speed, _max_speed, _distance_in_queue;
         int _controller_freq, _downSampling, _thread_numbers;
         bool _pub_twist_flag, _debug_info;
-        bool _target_received;
+        bool _target_received, _odom_received, _vel_received;
         double polyeval(Eigen::VectorXd coeffs, double x);
         Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals, int order);
 
         // 声明成员函数
         void odomCB(const nav_msgs::Odometry::ConstPtr& odomMsg);
+        void velCB(const nav_msgs::Odometry::ConstPtr& velMsg);
         void followControlLoopCB(const ros::TimerEvent&);
         void targetCB(const geometry_msgs::PoseStamped::ConstPtr &targetMsg);
+        void arTargetCB(const visualization_msgs::Marker::ConstPtr &targetMsg);
         void markerCB(const visualization_msgs::MarkerArray::ConstPtr &targetMsg);
         void pubTargetPrediction(const VectorXd& target_params);
+        void pubarTarget(const geometry_msgs::PoseStamped & ar_target_pose);
         void pubFollowPath(double x, double y, double theta);
         vector<vector<double>> bezier_curve(double start_x, double start_y, double start_theta, double end_x, double end_y, double end_theta, int num_points);
         double calculate_heading_error(const vector<vector<double>>& curve, double start_theta, double end_theta, double l);
         void publishBezierCurve(const vector<vector<double>>& bezierCurve);
         void publishDesirePose(double x_des, double y_des, double theta_des);
         void publishMPCTraj();
+        void publishDMBE();
+        vector<vector<double>> get_dmbe(const vector<vector<double>>& cur_ob);
+        void get_v_theta(vector<vector<double>>& cur_ob);
 }; // end of class
 
 MPCNode::MPCNode()
@@ -119,34 +132,46 @@ MPCNode::MPCNode()
     pn.param("mpc_bound_value", _bound_value,  1.0e6);
 
     // 话题&坐标系参数
-    pn.param<string>("target_topic", _target_topic, "/target_point/pose" );
-    pn.param<string>("odom_topic", _odom_topic, "/odom_gazebo" );
-    pn.param<string>("marker_topic", _marker_topic, "/traj_pred_node/predictions" );
-    pn.param<string>("map_frame", _map_frame, "map" ); //*****for mpc, "odom"
-    pn.param<string>("global_frame", _odom_frame, "odom");
-    pn.param<string>("car_frame", _car_frame, "base_footprint" );
+    pn.param<string>("target_topic",_target_topic,  "/target_point/pose" );
+    pn.param<string>("odom_topic",  _odom_topic,    "/Odometry_fast_lio" );
+    pn.param<string>("vel_odom_topic", _vel_odom_topic,    "/bunker_odom");
+    pn.param<string>("marker_topic",_marker_topic,  "/traj_pred_node/estimations" );
+
+    pn.param<string>("map_frame",   _map_frame,     "map" ); //*****for mpc, "odom"
+    pn.param<string>("global_frame",_odom_frame,    "camera_init");
+    pn.param<string>("car_frame",   _car_frame,     "os_sensor" );
 
     // 发布和订阅
     _sub_odom   = _nh.subscribe( _odom_topic, 1, &MPCNode::odomCB, this);
     _sub_target = _nh.subscribe( _target_topic, 1, &MPCNode::targetCB, this);
     _sub_marker = _nh.subscribe( _marker_topic, 1, &MPCNode::markerCB, this);
+    _sub_vel    = _nh.subscribe( _vel_odom_topic, 1, &MPCNode::velCB, this);
+    _sub_ar     = _nh.subscribe( "/visualization_marker", 1, &MPCNode::arTargetCB, this);
     ROS_INFO("Subscribed to %s, %s, %s", _odom_topic.c_str(), _target_topic.c_str(), _marker_topic.c_str());
 
-    _pub_mpctraj   = _nh.advertise<nav_msgs::Path>("/mpc_trajectory", 1);
-    _pub_mpctrajmarker = _nh.advertise<visualization_msgs::MarkerArray>("/mpc_trajectory_marker", 1);
+    _pub_mpctraj            = _nh.advertise<nav_msgs::Path>(                 "/mpc_trajectory", 1);
+    _pub_mpctrajmarker      = _nh.advertise<visualization_msgs::MarkerArray>("/mpc_trajectory_marker", 1);
     if(_pub_twist_flag)
-        _pub_twist = _nh.advertise<geometry_msgs::Twist>("/cmd_vel", 1);
-    _pub_target_prediction = _nh.advertise<visualization_msgs::Marker>("/target_prediction", 1);
-    _pub_follow_path = _nh.advertise<nav_msgs::Path>("/followCar_path", 1);
-    _pub_bazier_path = _nh.advertise<nav_msgs::Path>("/bazier_path",1);
-    _pub_desire_pose = _nh.advertise<geometry_msgs::PoseStamped>("/desire_pose", 1);
-    _pub_desirePointPath = _nh.advertise<nav_msgs::Path>("/desire_pose_path", 1);
+        _pub_twist          = _nh.advertise<geometry_msgs::Twist>(           "/cmd_vel", 1);
+    _pub_target_prediction  = _nh.advertise<visualization_msgs::Marker>(     "/target_prediction", 1);
+    _pub_ar_target          = _nh.advertise<visualization_msgs::Marker>(     "/ar_target_out", 1);
+    _pub_follow_path        = _nh.advertise<nav_msgs::Path>(                 "/followCar_path", 1);
+    _pub_bazier_path        = _nh.advertise<nav_msgs::Path>(                 "/bazier_path",1);
+    _pub_desire_pose        = _nh.advertise<geometry_msgs::PoseStamped>(     "/desire_pose", 1);
+    _pub_desirePointPath    = _nh.advertise<nav_msgs::Path>(                 "/desire_pose_path", 1);
+    _pub_dmbe               = _nh.advertise<visualization_msgs::MarkerArray>("/dmbe", 1);
 
     ros::Duration(0.5).sleep(); //等待接受目标信息
     _timer1 = _nh.createTimer(ros::Duration((1.0)/_controller_freq), &MPCNode::followControlLoopCB, this); // 10Hz
     
     // 初始化变量
+    _v_odom = 0.0;
+    _w_odom = 0.0;
+    _pre_v_odom = 0.0;
+    _pre_w_odom = 0.0;
     _target_received = false;
+    _odom_received = false;
+    _vel_received = false;
     _w = 0.0;
     _speed = 0.0;
     _xR = 0.0;
@@ -156,8 +181,6 @@ MPCNode::MPCNode()
     _wR = 0.0;
     _prev_vx = 0.0;
     _prev_vx = 0.0;
-    _pre_speed = 0.0;
-    _pre_w     = 0.0;
     _twist_msg = geometry_msgs::Twist();
     _mpc_traj = nav_msgs::Path();
 
@@ -186,6 +209,16 @@ int MPCNode::get_thread_numbers()
 // CallBack: Update odometry
 void MPCNode::odomCB(const nav_msgs::Odometry::ConstPtr& odomMsg) {
     _odom = *odomMsg;
+    _odom_received = true;
+}
+
+// CallBack: Update velocity
+void MPCNode::velCB(const nav_msgs::Odometry::ConstPtr& velMsg) {
+    _pre_v_odom = _v_odom;
+    _pre_w_odom = _w_odom;
+    _v_odom = velMsg->twist.twist.linear.x;
+    _w_odom = velMsg->twist.twist.angular.z;
+    _vel_received = true;
 }
 
 void MPCNode::targetCB(const geometry_msgs::PoseStamped::ConstPtr& targetMsg) 
@@ -219,8 +252,13 @@ void MPCNode::targetCB(const geometry_msgs::PoseStamped::ConstPtr& targetMsg)
         // 计算位置差异
         double delta_x = targetMsg->pose.position.x - _pre_target_pose.pose.position.x;
         double delta_y = targetMsg->pose.position.y - _pre_target_pose.pose.position.y;
-        tf2::Quaternion quaternion_diff = tf2::Quaternion(targetMsg->pose.orientation.x, targetMsg->pose.orientation.y, targetMsg->pose.orientation.z, targetMsg->pose.orientation.w) *
-                                        tf2::Quaternion(_pre_target_pose.pose.orientation.x, _pre_target_pose.pose.orientation.y, _pre_target_pose.pose.orientation.z, _pre_target_pose.pose.orientation.w).inverse();
+        tf2::Quaternion quaternion_diff = tf2::Quaternion(targetMsg->pose.orientation.x, 
+                                                          targetMsg->pose.orientation.y, 
+                                                          targetMsg->pose.orientation.z, 
+                                                          targetMsg->pose.orientation.w) * tf2::Quaternion(_pre_target_pose.pose.orientation.x, 
+                                                                                                           _pre_target_pose.pose.orientation.y, 
+                                                                                                           _pre_target_pose.pose.orientation.z, 
+                                                                                                           _pre_target_pose.pose.orientation.w).inverse();
         tf2::Vector3 rotation_vector = quaternion_diff.getAxis() * quaternion_diff.getAngle();
 
         // 计算速度
@@ -244,9 +282,70 @@ void MPCNode::targetCB(const geometry_msgs::PoseStamped::ConstPtr& targetMsg)
     }
 }
 
+void MPCNode::arTargetCB(const visualization_msgs::Marker::ConstPtr &targetMsg){
+    if(targetMsg->id == 0) {
+        _target_received = true;
+        _pre_target_pose = _target_pose;
+
+        _target_pose.header = targetMsg->header;
+        _target_pose.pose = targetMsg->pose;
+        geometry_msgs::PoseStamped global_pose;
+
+        try {
+            // 使用transformPose()函数将本地坐标系中的姿态转换为全局坐标系中的姿态
+            listener.transformPose(_odom_frame, _target_pose, global_pose);
+            _target_pose = global_pose;
+            // odom frame, _xR, _yR, _thetaR, _vR, _wR, _aR
+            _xR = global_pose.pose.position.x;
+            _yR = global_pose.pose.position.y;
+            _thetaR = tf::getYaw(global_pose.pose.orientation);
+            double d_x = global_pose.pose.position.x - _pre_target_pose.pose.position.x;
+            double d_y = global_pose.pose.position.y - _pre_target_pose.pose.position.y;
+            tf2::Quaternion quaternion_diff = tf2::Quaternion(global_pose.pose.orientation.x, 
+                                                              global_pose.pose.orientation.y, 
+                                                              global_pose.pose.orientation.z, 
+                                                              global_pose.pose.orientation.w) * tf2::Quaternion(_pre_target_pose.pose.orientation.x, 
+                                                                                                                _pre_target_pose.pose.orientation.y, 
+                                                                                                                _pre_target_pose.pose.orientation.z, 
+                                                                                                                _pre_target_pose.pose.orientation.w).inverse();
+            tf2::Vector3 rotation_vector = quaternion_diff.getAxis() * quaternion_diff.getAngle();
+
+            ros::Time current_time = ros::Time::now();
+            double delta_time = (current_time - _prev_time).toSec();
+            // 计算速度
+            const double vx = d_x / delta_time;
+            const double vy = d_y / delta_time;
+            _vR = sqrt(vx * vx + vy * vy);
+            _wR = rotation_vector.z() / delta_time;
+
+            // 计算加速度
+            const double ax = (vx - _prev_vx) / delta_time;
+            const double ay = (vy - _prev_vy) / delta_time;
+            // _aR = sqrt(ax * ax + ay * ay);
+            _aR = ax;
+
+            // 更新前一次位姿 时间 速度
+            _prev_vx = vx;
+            _prev_vy = vy;
+            _pre_target_pose = global_pose;
+            _prev_time = current_time;
+
+        } catch (tf::TransformException &ex) {
+            ROS_ERROR("Transform failed: %s", ex.what());
+            return;
+        }
+
+        pubarTarget(global_pose);
+    }
+    else {
+        return;
+    }
+}
+
+
 vector<vector<double>> linear_interpolation(vector<vector<double>> trajectory, double sampling_time) {
     // Check the validity of the input trajectory
-    if (trajectory.size() != 8 || trajectory[0].size() != 2) {
+    if (trajectory.size() != 8) {
         cout << "Invalid trajectory format." << endl;
         return {};
     }
@@ -255,10 +354,10 @@ vector<vector<double>> linear_interpolation(vector<vector<double>> trajectory, d
     int num_samples = static_cast<int>(3.2 / sampling_time) + 1;
 
     // Initialize the interpolated trajectory sequence
-    vector<vector<double>> interpolated_trajectory(num_samples, vector<double>(2, 0.0));
+    vector<vector<double>> interpolated_trajectory(num_samples+1, vector<double>(2, 0.0));
 
     // Linear interpolation
-    for (int i = 0; i < num_samples; ++i) {
+    for (int i = 0; i < num_samples+1; ++i) {
         double t = i * sampling_time;
 
         // Find the trajectory segment corresponding to the current time
@@ -274,60 +373,92 @@ vector<vector<double>> linear_interpolation(vector<vector<double>> trajectory, d
         interpolated_trajectory[i][1] = beta * trajectory[segment][1] + alpha * trajectory[segment + 1][1];
     }
 
+    interpolated_trajectory.pop_back();
+    interpolated_trajectory.pop_back();
+
     return interpolated_trajectory;
 }
 
+
+vector<vector<double>> MPCNode::get_dmbe(const vector<vector<double>>& cur_ob){
+    // cur_ob:(Xob, Yob, v, theta)
+    vector<vector<double>> dmbe;
+
+    double alpha = 2.0;
+    for(int i = 0; i < cur_ob.size(); i++){
+        double a = DMBE_MAX_LENGTH_A / (1 + std::exp(-alpha * (cur_ob[i][2])));
+        double b = DMBE_MAX_LENGTH_B;
+        double phi = cur_ob[i][3];
+        double h = cur_ob[i][0] - cos(phi) * sqrt(abs(a * a - b * b));
+        double k = cur_ob[i][1] - sin(phi) * sqrt(abs(a * a - b * b));
+        dmbe.push_back({h, k, a, b, phi});
+    }
+
+    return dmbe;
+}
+
+
+void MPCNode::get_v_theta(vector<vector<double>>& cur_ob){
+    // 计算每个位置之间的线速度v和方向theta
+    for (int i = 0; i < cur_ob.size() - 1; ++i) {
+        double delta_x = cur_ob[i][0] - cur_ob[i + 1][0];
+        double delta_y = cur_ob[i][1] - cur_ob[i + 1][1];
+        double v = sqrt(delta_x * delta_x + delta_y * delta_y);
+        double theta = atan2(delta_y, delta_x);
+        cur_ob[i].push_back(v);       // v
+        cur_ob[i].push_back(theta);
+    }
+    cur_ob.pop_back();
+}
 
 
 void MPCNode::markerCB(const visualization_msgs::MarkerArray::ConstPtr &targetMsg) {
     // 障碍物预测轨迹的回调函数
 
-    _mpc.obs.clear();
+    _mpc.all_obs.clear();
+    _mpc.all_dmbe.clear();
     double min_dist = std::numeric_limits<double>::max();
+    
+    // 获得全部障碍物轨迹
 
     for (auto it = targetMsg->markers.begin(); it != targetMsg->markers.end(); ++it) {
-        // cur_ob 包含8个预测点，每个预测点包含5个参数（Xob, Yob, a, b, theta）
-        vector<vector<double>> cur_ob;
-        
-        for(auto pt = it->points.begin(); pt != it->points.end(); ++pt) {
+        // cur_ob 包含8个预测点，每个预测点包含5个参数（Xob, Yob, v, theta）
+        vector<vector<double>> cur_ob(8, vector<double>(2, 0.0));
+        for(size_t i = 0; i < 8; ++i){
             // 遍历每个预测点
             vector<double> cur_pt;
-            cur_pt.push_back(pt->x);
-            cur_pt.push_back(pt->y);
-            cur_ob.push_back(cur_pt);
+            cur_pt.push_back(it->points[i + 8].x);
+            cur_pt.push_back(it->points[i + 8].y);
+            cur_ob[i] = cur_pt;
         }
-
-        cur_ob = linear_interpolation(cur_ob, 0.1);
-
-        // 计算每个位置之间的线速度v和方向theta
-        for (int i = 0; i < cur_ob.size(); ++i) {
-            double delta_x = cur_ob[i][0] - cur_ob[(i + 1) % cur_ob.size()][0];
-            double delta_y = cur_ob[i][1] - cur_ob[(i + 1) % cur_ob.size()][1];
-            double v = sqrt(delta_x * delta_x + delta_y * delta_y);
-            double theta = atan2(delta_y, delta_x);
-
-            // cur_ob[i].push_back(v);   // v for a
-            cur_ob[i].push_back(1.0);       // 暂时用圆形代替
-            cur_ob[i].push_back(1.0); // 1.0 for b
-            cur_ob[i].push_back(theta);
-        }
-        _mpc.obs.push_back(cur_ob);
 
         // 记录距离最近的障碍物
-
-        if(_mpc.init_states.empty()) {
-            cout << "init states is empty" << endl;
-            return;
-        }
+        if(_mpc.init_states.empty()) { return; }
         double dx = it->points[0].x - _mpc.init_states[0];
         double dy = it->points[0].y - _mpc.init_states[1];
         double cur_dist = dx * dx + dy * dy;
-        
+
         if(cur_dist < min_dist){
             min_dist = cur_dist;
-            _mpc.ob = cur_ob;
+            vector<vector<double>> cur_ob_interpolation = linear_interpolation(cur_ob, 0.1);
+            get_v_theta(cur_ob_interpolation);          // 对障碍物添加线速度和方向
+            _mpc.min_dmbe = get_dmbe(cur_ob_interpolation);
+            _mpc.ob = cur_ob_interpolation;
         }
+
+        _mpc.all_obs.push_back(cur_ob);
     }
+
+    // 对所有障碍物计算dmbe
+    for(int i = 0; i < _mpc.all_obs.size(); ++i){
+        vector<vector<double>> cur_ob = _mpc.all_obs[i];
+        get_v_theta(cur_ob);
+        vector<vector<double>> cur_dmbe = get_dmbe(cur_ob);
+        _mpc.all_dmbe.push_back(cur_dmbe);
+    }
+
+    // viz DMBE; 
+    publishDMBE();
 }
 
 void MPCNode::pubTargetPrediction(const VectorXd& target_params) {
@@ -359,6 +490,29 @@ void MPCNode::pubTargetPrediction(const VectorXd& target_params) {
     // 设置标记的生存时间
     marker.lifetime = ros::Duration(1);
     _pub_target_prediction.publish(marker);
+}
+
+void MPCNode::pubarTarget(const geometry_msgs::PoseStamped & ar_target_pose) {
+    visualization_msgs::Marker marker;
+    marker.header.frame_id = _odom_frame;
+    marker.header.stamp = ros::Time::now();
+    marker.ns = "ar_target_pose";
+    marker.id = 0;
+    marker.type = visualization_msgs::Marker::CUBE;
+    // 设置标记的尺寸
+    marker.scale.x = 0.3;
+    marker.scale.y = 0.3;
+    marker.scale.z = 1.0;
+    // 设置标记的颜色
+    marker.color.r = 0.7;
+    marker.color.g = 0.6;
+    marker.color.b = 0.0;
+    marker.color.a = 1.0;
+    // 设置标记的姿态和位置
+    marker.pose = ar_target_pose.pose;
+    // 设置标记的生存时间
+    marker.lifetime = ros::Duration(0.25);
+    _pub_ar_target.publish(marker);
 }
 
 void MPCNode::pubFollowPath(double x, double y, double theta) {
@@ -503,6 +657,60 @@ void MPCNode::publishBezierCurve(const vector<vector<double>>& bezierCurve)
     _pub_bazier_path.publish(pathMsg);
 }
 
+void MPCNode::publishDMBE(){
+    if(_mpc.all_dmbe.empty()) return;
+    visualization_msgs::MarkerArray ellipse_vis;
+
+    vector<vector<vector<double>>> all_dmbe = _mpc.all_dmbe;
+    // obs location
+    // cout << "obs location" << endl;
+    // for(int i = 0; i < _mpc.all_obs.size(); ++i){
+    //     for(auto it : _mpc.all_obs[i]){
+    //         cout << "[" << it[0] << ", " << it[1] << "]," << endl;
+    //     }
+    //     cout << endl;
+    // }
+    // cout << "dmbe" << endl;
+    // for(int i = 0; i < _mpc.all_dmbe.size(); ++i){
+    //     for(auto it : _mpc.all_dmbe[i]){
+    //         cout << "[" << it[0] << ", " << it[1] << ", " << it[2] << ", " << it[3] << ", " << it[4] << "]," << endl;
+    //     }
+    //     cout << endl;
+    // }
+
+    for(size_t i = 0; i < all_dmbe.size(); ++i){
+        // dmbe:[[h0, k0, a0, b0, phi0], [h1, k1, a1, b1, phi1], ... , [ht, kt, at, bt, phit]]
+        for(size_t j = 0; j < all_dmbe[i].size(); ++j){
+            visualization_msgs::Marker Marker;
+            Marker.header.frame_id = _odom_frame;
+            Marker.header.stamp = ros::Time::now();
+            Marker.ns = "ellipse";
+            Marker.type = visualization_msgs::Marker::CYLINDER;
+            Marker.action = visualization_msgs::Marker::ADD;
+            Marker.lifetime = ros::Duration(0.45);
+            Marker.id = j + i * (all_dmbe.size() * 2);
+            Marker.pose.orientation.x = 0.0;
+            Marker.pose.orientation.y = 0.0;
+            Marker.pose.orientation.z = sin(all_dmbe[i][j][4] / 2.0);
+            Marker.pose.orientation.w = cos(all_dmbe[i][j][4] / 2.0);
+            Marker.pose.position.x = all_dmbe[i][j][0];
+            Marker.pose.position.y = all_dmbe[i][j][1];
+            Marker.pose.position.z = 0.25;
+            Marker.scale.x = all_dmbe[i][j][2] * 2;
+            Marker.scale.y = all_dmbe[i][j][3] * 2;
+            Marker.scale.z = 0.5;
+            Marker.color.a = 0.3;
+            Marker.color.r = 1.0;
+            Marker.color.g = 0.0;
+            Marker.color.b = 0.0;
+
+            ellipse_vis.markers.push_back(Marker);
+        }
+        
+    }
+    _pub_dmbe.publish(ellipse_vis);
+}
+
 void MPCNode::publishDesirePose(double x_des, double y_des, double theta_des) {
     geometry_msgs::PoseStamped desired_pose;
 
@@ -583,8 +791,8 @@ void MPCNode::publishMPCTraj() {
 }
 
 void MPCNode::followControlLoopCB(const ros::TimerEvent&)
-{
-    if( _target_received ) //received target
+{   
+    if( _target_received &&  _odom_received && _vel_received) //received target
     {
         nav_msgs::Odometry odom = _odom; 
         nav_msgs::Path odom_path = _odom_path;   
@@ -602,18 +810,14 @@ void MPCNode::followControlLoopCB(const ros::TimerEvent&)
         // double thetaF = tf::getYaw(pose.getRotation()) + M_PI;  // -pi ~ pi
         double thetaF = tf::getYaw(pose.getRotation());
         
-        const double vF = _speed;
-        const double wF = _w;
+        // const double vF = _speed;
+        // const double wF = _w;
+        const double vF = _v_odom;
+        const double wF = _w_odom;
         const double dt = _dt;
-        const double aF = (_speed - _pre_speed) / dt;       // acceleration
-        const double dwF= (_w - _pre_w) / dt;               // delta of w
-        _mpc.init_states.push_back(xF);          // 更新全局位置
-        _mpc.init_states.push_back(yF);
-        _mpc.init_states.push_back(thetaF);
-        _mpc.init_states.push_back(vF);
-        _mpc.init_states.push_back(wF);
-        _mpc.init_states.push_back(aF);
-        _mpc.init_states.push_back(dwF);
+        const double aF = (_v_odom - _pre_v_odom) / dt;       // acceleration
+        const double dwF= (_w_odom - _pre_w_odom) / dt;               // delta of w
+        _mpc.init_states = {xF, yF, thetaF, vF, wF, aF, dwF};
 
         // update refrence car, odom frame
         const double xR = _xR;
@@ -680,8 +884,6 @@ void MPCNode::followControlLoopCB(const ros::TimerEvent&)
         vector<double> mpc_results = _mpc.Solve(state, target_params);
 
         // ******************************************* 处理并发布话题 ********************************************
-        _pre_speed = _speed;
-        _pre_w = _w;
         _speed = mpc_results[0]; // radian/sec, angular velocity
         _w = mpc_results[1]; // acceleration
 
@@ -711,7 +913,7 @@ void MPCNode::followControlLoopCB(const ros::TimerEvent&)
     }else {
         _speed = 0.0;
         _w = 0;
-        cout << "Target not recevied!" << endl;
+        cout << "_target_received:" <<  _target_received << ", _odom_received" << _odom_received << ", _vel_received:" << _vel_received << endl;
     }
     // publish general cmd_vel 
     if(_pub_twist_flag) {
