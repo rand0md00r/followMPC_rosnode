@@ -16,7 +16,7 @@
 
 #include <fstream>
 
-#include "followMpc.h"
+#include "pureMPC_euc_dist.h"
 #include <Eigen/Core>
 #include <Eigen/QR>
 #include <queue>
@@ -38,7 +38,7 @@ class MPCNode
         
     private:
         ros::NodeHandle _nh;
-        ros::Subscriber _sub_odom, _sub_target, _sub_marker;
+        ros::Subscriber _sub_odom, _sub_target, _sub_marker, _sub_obstacle;
         ros::Publisher _pub_twist, _pub_mpctraj, _pub_target_prediction, _pub_follow_path, _pub_bazier_path, _pub_desire_pose, _pub_desirePointPath, _pub_mpctrajmarker;
         ros::Publisher _pub_dmbe, _pub_min_dmbe;
         ros::Timer _timer1;
@@ -86,6 +86,7 @@ class MPCNode
         void followControlLoopCB(const ros::TimerEvent&);
         void targetCB(const geometry_msgs::PoseStamped::ConstPtr &targetMsg);
         void markerCB(const visualization_msgs::MarkerArray::ConstPtr &targetMsg);
+        void obstacleCB(const visualization_msgs::MarkerArray::ConstPtr &targetMsg);
         void pubTargetPrediction(const VectorXd& target_params);
         void pubFollowPath(double x, double y, double theta);
         vector<vector<double>> bezier_curve(double start_x, double start_y, double start_theta, double end_x, double end_y, double end_theta, int num_points);
@@ -117,7 +118,7 @@ MPCNode::MPCNode()
     // 加载求解MPC参数
     pn.param("target_distance", _distance,  1.0);
     pn.param("target_alpha",    _alpha,     3.14);
-    pn.param("mpc_steps",       _mpc_steps, 20.0);
+    pn.param("mpc_steps",       _mpc_steps, 30.0);
     pn.param("mpc_w_ex",        _w_ex,      1000.0);
     pn.param("mpc_w_etheta",    _w_etheta,  1.0);
     pn.param("mpc_w_vel",       _w_vel,     1000.0);
@@ -139,6 +140,7 @@ MPCNode::MPCNode()
     _sub_odom   = _nh.subscribe( _odom_topic, 1, &MPCNode::odomCB, this);
     _sub_target = _nh.subscribe( _target_topic, 1, &MPCNode::targetCB, this);
     _sub_marker = _nh.subscribe( _marker_topic, 1, &MPCNode::markerCB, this);
+    _sub_obstacle = _nh.subscribe( "/obstacles", 1, &MPCNode::obstacleCB, this);
     ROS_INFO("Subscribed to %s, %s, %s", _odom_topic.c_str(), _target_topic.c_str(), _marker_topic.c_str());
 
     _pub_mpctraj   = _nh.advertise<nav_msgs::Path>("/mpc_trajectory", 1);
@@ -300,9 +302,7 @@ vector<vector<double>> MPCNode::get_dmbe(const vector<vector<double>>& cur_ob){
     for(int i = 0; i < cur_ob.size(); i++){
         // double a = DMBE_MAX_LENGTH_A / (1 + std::exp(-alpha * (cur_ob[i][2])));
         double a = DMBE_MAX_LENGTH_A + DMBE_MAX_LENGTH_A * (double(i) / cur_ob.size()) * 0.5;
-        // double a = DMBE_MAX_LENGTH_B;
         double b = DMBE_MAX_LENGTH_B + DMBE_MAX_LENGTH_B * (double(i) / cur_ob.size())* 0.5;
-        // double b = DMBE_MAX_LENGTH_B;
         double phi = cur_ob[i][3];
         // double h = cur_ob[i][0] - cos(phi) * sqrt(a * a - b * b);
         // double k = cur_ob[i][1] - sin(phi) * sqrt(a * a - b * b);
@@ -359,7 +359,7 @@ void MPCNode::markerCB(const visualization_msgs::MarkerArray::ConstPtr &targetMs
         double dy = it->points[0].y - _mpc.init_states[1];
         double cur_dist = dx * dx + dy * dy;
 
-        if(cur_dist < min_dist && dx > -0.5 ){
+        if(cur_dist < min_dist && dx > 0){
             min_dist = cur_dist;
             vector<vector<double>> cur_ob_interpolation = linear_interpolation(cur_ob, 0.1);
             get_v_theta(cur_ob_interpolation);          // 对障碍物添加线速度和方向
@@ -381,6 +381,27 @@ void MPCNode::markerCB(const visualization_msgs::MarkerArray::ConstPtr &targetMs
     // viz DMBE; 
     publishDMBE();
     publishMinDMBE();
+}
+
+void MPCNode::obstacleCB(const visualization_msgs::MarkerArray::ConstPtr &obstacleMsg) {
+    // 障碍物的回调函数
+    _mpc.ob.clear();
+    double min_dist = std::numeric_limits<double>::max();
+    
+    // 获得全部障碍物轨迹
+
+    for (auto it = obstacleMsg->markers.begin(); it != obstacleMsg->markers.end(); ++it) {
+        // 记录距离最近的障碍物
+        if(_mpc.init_states.empty()) { return; }
+        double dx = it->pose.position.x - _mpc.init_states[0];
+        double dy = it->pose.position.y - _mpc.init_states[1];
+        double cur_dist = dx * dx + dy * dy;
+
+        if(cur_dist < min_dist && dx > 0){
+            min_dist = cur_dist;
+            _mpc.ob = {{it->pose.position.x, it->pose.position.y}};
+        }
+    }
 }
 
 void MPCNode::pubTargetPrediction(const VectorXd& target_params) {
@@ -836,7 +857,7 @@ void MPCNode::followControlLoopCB(const ros::TimerEvent&)
 int main(int argc, char **argv)
 {
     //Initiate ROS
-    ros::init(argc, argv, "MPC_Node");
+    ros::init(argc, argv, "pureMPC_Node");
     MPCNode mpc_node;
     ROS_INFO("Waiting for global path msgs ~");
     ros::AsyncSpinner spinner(mpc_node.get_thread_numbers()); // Use multi threads

@@ -18,7 +18,7 @@ distance_in_queue: 100.0        # use bazier when out of queue
 
 # Parameter for MPC solver
 target_distance : 1.0
-target_alpha    : 3.14
+target_alpha    : 1.57  # 135 degree
 mpc_steps       : 30.0
 mpc_max_angvel  : 1.0
 # mpc_max_throttle: 1.0

@@ -10,7 +10,7 @@
     <arg name="pitch" default="0"/>
     <!-- line -->
     <arg name="x_pos" default="0.0" if="$(eval trajectory_type == 'line')" />
-    <arg name="y_pos" default="0.0" if="$(eval trajectory_type == 'line')" />
+    <arg name="y_pos" default="-1.0" if="$(eval trajectory_type == 'line')" />
     <arg name="yaw" default="0.0" if="$(eval trajectory_type == 'line')" />
     <!-- circle -->
     <arg name="x_pos" default="3.0" if="$(eval trajectory_type == 'circle')" />
@@ -52,22 +52,22 @@
 
 
     <!--  ************** Target point generation **************  -->
-    <node name="mpc_trajectory_generation" pkg="mpc_ros" type="dynamic_point_publisher.py">
+    <node name="mpc_trajectory_generation" pkg="mpc_ros" type="dyna_pub_section_4_2_mpc_cbf.py">
         <param name="trajectory_type" value="$(arg trajectory_type)"/>
     </node>
     <!-- <node name="mpc_trajectory_generation" pkg="mpc_ros" type="gen_rounded_rectangle.py" if="$(eval trajectory_type == 'rectangle')">
     </node> -->
 
     <!--  ************** obstacles point generation **************  -->
-    <node name="obstacle_generation" pkg="mpc_ros" type="obstacle_generation.py">
+    <node name="obstacle_generation" pkg="mpc_ros" type="obstacle_section_4_test2_mpc_cbf.py">
     </node>
+    <!-- <node name="pub_static_pred_traj" pkg="mpc_ros" type="pub_static_pred_traj.py">
+    </node> -->
+    
 
     <!--  ************** MPC Node **************  -->
     <node name="MPC_tracking" pkg="mpc_ros" type="follow_mpc" output="screen" >
-        <!-- <rosparam file="$(find mpc_ros)/params/mpc_target_track.yaml" command="load" />
-
-        <param name="mpc_max_angvel" type="double" value="3.0" if="$(eval trajectory_type == 'rectangle')"/>
-        <param name="mpc_w_angvel_d" type="double" value="10000.0" if="$(eval trajectory_type == 'rectangle')"/> -->
+        <rosparam file="$(find mpc_ros)/params/section_4_test2_mpc_cbf.yaml" command="load" />
     </node>
 
     <!--  ************** Visualisation **************  -->

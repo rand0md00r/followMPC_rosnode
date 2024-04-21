@@ -1,0 +1,28 @@
+SmacPlannerHybridMulti: 
+
+  tolerance: 0.125
+  downsample_costmap: False
+  downsampling_factor: 6
+  angle_quantization_bins: 72
+  allow_unknown: false
+
+
+  use_visualization: False
+  use_euclidean: False
+  extension_directions_bins: 5
+  minimum_truning_radius: 3
+
+  cache_obstacle_heuristic: True
+
+  reverse_penalty: 100.0
+  change_penalty: 100
+  non_straight_penalty: 1.2
+  cost_penalty: 0.2
+  retrospective_penalty: 0.015
+
+  analytic_expansion_ratio: 3.5
+  analytic_expansion_max_length: 3.0
+
+  lookup_table_size: 10 
+
+  motion_model_for_search: "DUBIN"

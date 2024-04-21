@@ -62,6 +62,10 @@ TARGET_LINK_LIBRARIES(tracking_reference_trajectory ipopt ${catkin_LIBRARIES} )
 ADD_EXECUTABLE( follow_mpc src/followMPC.cpp src/followMPCNode.cpp )
 TARGET_LINK_LIBRARIES(follow_mpc ipopt ${catkin_LIBRARIES} )
 
+# pure MPC euclidean distance avioidance
+ADD_EXECUTABLE( pure_mpc src/pureMPC_euc_dist.cpp src/pureMPC_euc_dist_Node.cpp )
+TARGET_LINK_LIBRARIES(pure_mpc ipopt ${catkin_LIBRARIES} )
+
 #############
 ## Example ##
 #############

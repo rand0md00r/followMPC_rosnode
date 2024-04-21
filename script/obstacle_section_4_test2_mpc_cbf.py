@@ -20,41 +20,38 @@ def generate_points(time, radius, center):
 
 def gen_points_1(time, center):
     vel = 0.5
-    amplitude = 2.0  # 垂直方向上的振幅
-    period = 15.0  # 周期
     # x = center[0]
     # y = center[1] - amplitude * math.sin(2 * math.pi * time / period)  # 使用正弦函数生成上下运动
-    x = center[0]
-    y = center[1] + time * vel
+    x = center[0] + time * vel 
+    y = center[1]
     print("x:", x, " y:", y)
     return x, y
 
-def gen_points_2(time, center):
-    vel = 0.5
-    amplitude = 2.0  # 垂直方向上的振幅
-    period = 15.0  # 周期
-    x = center[0]
-    # y = center[1] + amplitude * math.sin(2 * math.pi * time / period)  # 使用正弦函数生成上下运动
-    y = center[1] - time * vel
-    return x, y
+# def gen_points_2(time, center):
+#     vel = 0.5
+#     amplitude = 2.0  # 垂直方向上的振幅
+#     period = 15.0  # 周期
+#     x = center[0]
+#     # y = center[1] + amplitude * math.sin(2 * math.pi * time / period)  # 使用正弦函数生成上下运动
+#     y = center[1] - time * vel
+#     return x, y
 
-def gen_points_3(time, center):
-    vel = 0.5
-    amplitude = 2.0  # 垂直方向上的振幅
-    period = 15.0  # 周期
-    x = center[0]
-    # y = center[1] - amplitude * math.sin(2 * math.pi * time / period)  # 使用正弦函数生成上下运动
-    y = center[1] + time * vel
-    return x, y
+# def gen_points_3(time, center):
+#     vel = 0.5
+#     amplitude = 2.0  # 垂直方向上的振幅
+#     period = 15.0  # 周期
+#     x = center[0]
+#     # y = center[1] - amplitude * math.sin(2 * math.pi * time / period)  # 使用正弦函数生成上下运动
+#     y = center[1] + time * vel
+#     return x, y
 
-def gen_points_4(time, center):
-    vel = 1.0
-    amplitude = 2.0  # 垂直方向上的振幅
-    period = 15.0  # 周期
-    x = center[0]
-    # y = center[1] + amplitude * math.sin(2 * math.pi * time / period)  # 使用正弦函数生成上下运动
-    y = center[1] - time * vel
-    return x, y
+# def gen_points_4(time, center):
+#     vel = 1.0
+#     # x = center[0]
+#     # y = center[1] - time * vel
+#     x = center[0] - time * vel
+#     y = center[1]
+#     return x, y
 
 def points_to_marker_array(points):
     marker_array = MarkerArray()
@@ -86,7 +83,7 @@ pub = rospy.Publisher('/obstacles', MarkerArray, queue_size=10)
 
 # radius = 1.0
 # center = [[0.0, 1.0], [-3.0, 4.0], [-3.0, -2.0], [-6.0, 1.0]]
-center = [[5.0, -2.5], [10.0, 5.0], [15.0, -7.3], [20.0, 20.0]]
+center = [[0.0, -1.6], [10.0, 5.0], [15.0, -7.3], [30.0, 0.5]]
 
 rate = rospy.Rate(10)
 time = 0.0
@@ -94,10 +91,10 @@ time = 0.0
 while not rospy.is_shutdown():
     points = []
     points.append(gen_points_1(time, center[0]))
-    points.append(gen_points_2(time, center[1]))
-    points.append(gen_points_3(time, center[2]))
-    points.append(gen_points_4(time, center[3]))
+    # points.append(gen_points_2(time, center[1]))
+    # points.append(gen_points_3(time, center[2]))
+    # points.append(gen_points_4(time, center[3]))
     marker_array = points_to_marker_array(points)
     pub.publish(marker_array)
-    time += 0.05
+    time += 0.1
     rate.sleep()

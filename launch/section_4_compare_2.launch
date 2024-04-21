@@ -30,10 +30,11 @@
     <arg name="yaw" default="0" if="$(eval trajectory_type == 'epitrochoid')" />
     
     <!--  ************** Robot model ***************  -->
-    <param name="robot_description" command="$(find xacro)/xacro $(find base_ws)/urdf/base.xacro" />
+    <param name="robot_description" command="$(find xacro)/xacro $(find base_ws)/urdf/base_velodyne_description.xacro" />
 
     <include file="$(find gazebo_ros)/launch/empty_world.launch">
-        <arg name="world_name" value="$(find gazebo_ros)/launch/empty_world.launch"/>
+        <!-- <arg name="world_name" value="$(find gazebo_ros)/launch/empty_world.launch"/> -->
+        <arg name="world_name" value="/home/catkin_ws/src/mpc_ros/mpc_ros/worlds/obstacle.world"/>
         <arg name="paused" value="false"/>
         <arg name="use_sim_time" value="true"/>
         <arg name="gui" value="$(arg gui)"/>
@@ -51,23 +52,27 @@
     </node>
 
 
-    <!--  ************** Target point generation **************  -->
+    <!--  ************** Target & obstacles point generation **************  -->
     <node name="mpc_trajectory_generation" pkg="mpc_ros" type="dynamic_point_publisher.py">
         <param name="trajectory_type" value="$(arg trajectory_type)"/>
     </node>
-    <!-- <node name="mpc_trajectory_generation" pkg="mpc_ros" type="gen_rounded_rectangle.py" if="$(eval trajectory_type == 'rectangle')">
-    </node> -->
 
-    <!--  ************** obstacles point generation **************  -->
-    <node name="obstacle_generation" pkg="mpc_ros" type="obstacle_generation.py">
-    </node>
+    <node name="obstacle_generation" pkg="mpc_ros" type="obstacle_generation.py" />
 
-    <!--  ************** MPC Node **************  -->
-    <node name="MPC_tracking" pkg="mpc_ros" type="follow_mpc" output="screen" >
-        <!-- <rosparam file="$(find mpc_ros)/params/mpc_target_track.yaml" command="load" />
 
-        <param name="mpc_max_angvel" type="double" value="3.0" if="$(eval trajectory_type == 'rectangle')"/>
-        <param name="mpc_w_angvel_d" type="double" value="10000.0" if="$(eval trajectory_type == 'rectangle')"/> -->
+    <!--  ************** Navigation **************  -->
+    <node name="map_server" pkg="map_server" type="map_server" args="/home/catkin_ws/src/mpc_ros/mpc_ros/map/map.yaml" />
+    <node pkg="tf2_ros" type="static_transform_publisher" name="map_to_odom" args="0 0 0 0 0 0 map odom" />
+
+    <node pkg="move_base" type="move_base" respawn="false" name="move_base" output="screen">
+        <rosparam file="$(find mpc_ros)/params/costmap_common_params.yaml" command="load" ns="global_costmap" />
+        <rosparam file="$(find mpc_ros)/params/costmap_common_params.yaml" command="load" ns="local_costmap" />
+        <rosparam file="$(find mpc_ros)/params/local_costmap_params.yaml" command="load" />
+        <rosparam file="$(find mpc_ros)/params/global_costmap_params.yaml" command="load" />
+        <rosparam file="$(find mpc_ros)/params/base_local_planner_params.yaml" command="load" />
+        <rosparam file="$(find mpc_ros)/params/global_planner_params.yaml" command="load" />
+        <rosparam file="$(find mpc_ros)/params/move_base_params.yaml" command="load" />
+        <!-- <rosparam file="$(find mpc_ros)/params/dwa_local_planner_params.yaml" command="load" /> -->
     </node>
 
     <!--  ************** Visualisation **************  -->

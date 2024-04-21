@@ -1,5 +1,5 @@
 
-#include "followMpc.h"
+#include "pureMPC_euc_dist.h"
 #include <cppad/ipopt/solve.hpp>
 #include <Eigen/Core>
 #include <bits/stdc++.h>
@@ -60,6 +60,7 @@ class FG_eval
         vector<vector<double>> _min_dmbe;
         vector<vector<double>> _min_ob;
         vector<double> _cur_state;
+        vector<vector<vector<double>>> _all_obs;
         float gamma_k;
 
         // Constructor
@@ -95,7 +96,7 @@ class FG_eval
         }
 
         // Load parameters for constraints
-        void LoadParams(const std::map<string, double> &params, Eigen::VectorXd target_params, const vector<vector<double>>& min_dmbe, const vector<vector<double>>& min_ob, const vector<double>& init_state)
+        void LoadParams(const std::map<string, double> &params, Eigen::VectorXd target_params, const vector<vector<double>>& min_dmbe, const vector<vector<double>>& min_ob, const vector<double>& init_state, const vector<vector<vector<double>>> &all_obs)
         {
             _target_params = target_params;
             _dt = params.find("DT") != params.end() ? params.at("DT") : _dt;
@@ -115,7 +116,7 @@ class FG_eval
             _min_dmbe = min_dmbe;
             _min_ob = min_ob;
             _cur_state = init_state;
-
+            _all_obs = all_obs;
         }
 
         typedef CPPAD_TESTVECTOR(AD<double>) ADvector; 
@@ -131,6 +132,7 @@ class FG_eval
             cost_angvel_d = 0;
             cost_vel_d = 0;
 
+
             for (int i = 0; i < _mpc_steps; i++) 
             {
                 fg[0] += _w_ex * CppAD::pow(vars[_ex_start + i], 2);
@@ -139,15 +141,37 @@ class FG_eval
                 fg[0] += _w_vel * CppAD::pow(vars[_v_start + i], 2);
                 fg[0] += _w_angvel * CppAD::pow(vars[_angvel_start + i], 2);
 
+                // if(!_min_ob.empty()){
+                //     double _w_obst = 2000;
+                //     AD<double> dx = CppAD::pow(vars[_x_start + i] - _min_ob[0][0], 2);
+                //     AD<double> dy = CppAD::pow(vars[_y_start + i] - _min_ob[0][1], 2);
+                //     fg[0] += _w_obst / (dx + dy + 1.0e-6);
+
+                //     cout << "obstacle cost: " << _w_obst / (dx + dy + 1.0e-6) << endl;
+                // }
+                cout << "_all_obs.empty()" << _all_obs.empty() << endl;
+                if(!_all_obs.empty()){
+                    for (int i = 0 ; i < _all_obs.size(); ++i){
+                        cout << _all_obs[i][0][0] << ", " << _all_obs[i][0][1] << endl;
+                    }
+                    double _w_obst = 20000;
+                    for (int i = 0; i < _all_obs.size(); ++i){
+                        AD<double> dx = CppAD::pow(vars[_x_start + i] - _all_obs[i][0][0], 2);
+                        AD<double> dy = CppAD::pow(vars[_y_start + i] - _all_obs[i][0][1], 2);
+                        fg[0] += _w_obst / (dx * dx + dy * dy + 1.0e-6);
+                        cout << "_w_obst / (dx * dx + dy * dy + 1.0e-6):" << _w_obst / (dx * dx + dy * dy + 1.0e-6) << endl; 
+                    }
+                }
+
                 cost_ex +=  _w_ex * CppAD::pow(vars[_ex_start + i], 2);
                 cost_ey +=  _w_ex * CppAD::pow(vars[_ey_start + i], 2); 
                 cost_etheta += _w_etheta * CppAD::pow(vars[_etheta_start + i], 2);
                 cost_vel += _w_vel * CppAD::pow(vars[_v_start + i], 2);
                 cost_angvel += _w_angvel * CppAD::pow(vars[_angvel_start + i], 2);
             }
-            // cout << "--- costs   ---" <<endl;
-            // cout << "ex: " << cost_ex << ", \t etheta:" << cost_etheta << endl;
-            // cout << "vel:" << cost_vel << ", \t angvel:" << cost_angvel << endl;
+            cout << "--- costs   ---" <<endl;
+            cout << "ex: " << cost_ex << ", \t etheta:" << cost_etheta << endl;
+            cout << "vel:" << cost_vel << ", \t angvel:" << cost_angvel << endl;
 
             // 角速度、加速度变化惩罚
             for (int i = 0; i < _mpc_steps - 2; i++) {
@@ -183,22 +207,22 @@ class FG_eval
             
             // cbf约束
 
-            if(!_min_dmbe.empty()){
+            // if(!_min_dmbe.empty()){
 
-                vector<AD<double>> dmbe_1 = {_min_dmbe[1][0], _min_dmbe[1][1], _min_dmbe[1][2], _min_dmbe[1][3], _min_dmbe[1][4]};
-                vector<AD<double>> dmbe_0 = {_min_dmbe[0][0], _min_dmbe[0][1], _min_dmbe[0][2], _min_dmbe[0][3], _min_dmbe[0][4]};
-                vector<AD<double>> ob_1 = {_min_ob[1][0], _min_ob[1][1]};
-                vector<AD<double>> ob_0 = {_min_ob[0][0], _min_ob[0][1]};
+            //     vector<AD<double>> dmbe_1 = {_min_dmbe[1][0], _min_dmbe[1][1], _min_dmbe[1][2], _min_dmbe[1][3], _min_dmbe[1][4]};
+            //     vector<AD<double>> dmbe_0 = {_min_dmbe[0][0], _min_dmbe[0][1], _min_dmbe[0][2], _min_dmbe[0][3], _min_dmbe[0][4]};
+            //     vector<AD<double>> ob_1 = {_min_ob[1][0], _min_ob[1][1]};
+            //     vector<AD<double>> ob_0 = {_min_ob[0][0], _min_ob[0][1]};
 
-                AD<double> h1 = h({vars[_x_start + 1], vars[_y_start + 1]}, dmbe_1, ob_1);
-                AD<double> h0 = h({vars[_x_start], vars[_y_start]}, dmbe_0, ob_0);
+            //     AD<double> h1 = h({vars[_x_start + 1], vars[_y_start + 1]}, dmbe_1, ob_1);
+            //     AD<double> h0 = h({vars[_x_start], vars[_y_start]}, dmbe_0, ob_0);
 
-                fg[1 + _cbf_start] = h1 - (1 - gamma_k) * h0;
-            }
-            else {
-                cout << "trajectoty prediction have not been received" << endl;
-                fg[1 + _cbf_start] = 1.0e19;
-            }
+            //     fg[1 + _cbf_start] = h1 - (1 - gamma_k) * h0;
+            // }
+            // else {
+            //     cout << "trajectoty prediction have not been received" << endl;
+            //     fg[1 + _cbf_start] = 1.0e19;
+            // }
 
             // 系统运动学模型约束 单射
             for (int i = 0; i < _mpc_steps - 1; i++)
@@ -231,18 +255,18 @@ class FG_eval
                 fg[2 + _etheta_start + i]= thetaE1 - (thetaE0 + (wR0 - w0) * _dt);
 
                 // cbf 约束
-                if(!_min_dmbe.empty()){
-                    vector<AD<double>> dmbe_next = {_min_dmbe[i + 1][0], _min_dmbe[i + 1][1], _min_dmbe[i + 1][2], _min_dmbe[i + 1][3], _min_dmbe[i + 1][4]};
-                    vector<AD<double>> dmbe_cur = {_min_dmbe[i][0], _min_dmbe[i][1], _min_dmbe[i][2], _min_dmbe[i][3], _min_dmbe[i][4]};
-                    vector<AD<double>> ob_next = {_min_ob[i + 1][0], _min_ob[i + 1][1]};
-                    vector<AD<double>> ob_cur = {_min_ob[i][0], _min_ob[i][1]};
-                    AD<double> h_next = h({vars[_x_start + i + 1], vars[_y_start + i + 1]}, dmbe_next, ob_next);
-                    AD<double> h_cur = h({vars[_x_start + i], vars[_y_start + i]}, dmbe_cur, ob_cur);
-                    fg[2 + _cbf_start + i]   = h_next - (1 - gamma_k) * h_cur;
-                }
-                else {
-                    fg[2 + _cbf_start + i] = 1.0e19;
-                }
+                // if(!_min_dmbe.empty()){
+                //     vector<AD<double>> dmbe_next = {_min_dmbe[i + 1][0], _min_dmbe[i + 1][1], _min_dmbe[i + 1][2], _min_dmbe[i + 1][3], _min_dmbe[i + 1][4]};
+                //     vector<AD<double>> dmbe_cur = {_min_dmbe[i][0], _min_dmbe[i][1], _min_dmbe[i][2], _min_dmbe[i][3], _min_dmbe[i][4]};
+                //     vector<AD<double>> ob_next = {_min_ob[i + 1][0], _min_ob[i + 1][1]};
+                //     vector<AD<double>> ob_cur = {_min_ob[i][0], _min_ob[i][1]};
+                //     AD<double> h_next = h({vars[_x_start + i + 1], vars[_y_start + i + 1]}, dmbe_next, ob_next);
+                //     AD<double> h_cur = h({vars[_x_start + i], vars[_y_start + i]}, dmbe_cur, ob_cur);
+                //     fg[2 + _cbf_start + i]   = h_next - (1 - gamma_k) * h_cur;
+                // }
+                // else {
+                //     fg[2 + _cbf_start + i] = 1.0e19;
+                // }
 
                 thetaR0 = thetaR0 + wR0 * _dt;
                 vR0 = vR0 + aR * _dt;
@@ -340,13 +364,14 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd target_params)
     // 设置变量的上下限
     Dvector vars_lowerbound(n_vars);
     Dvector vars_upperbound(n_vars);
-    
+
     // 将所有非执行机构的上限和下限设置为最大负值和正值。
     for (int i = 0; i < _v_start; i++) 
     {
         vars_lowerbound[i] = -_bound_value;
         vars_upperbound[i] = _bound_value;
     }
+    
     // 速度上下限
     for (int i = _v_start; i < _angvel_start; i++) 
     {
@@ -357,6 +382,7 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd target_params)
     //  角度的上限和下限分别设置为-25度和25度（以弧度为单位的值）。
     for (int i = _angvel_start; i < n_vars; i++)
     {
+
         vars_lowerbound[i] = -_max_angvel;
         vars_upperbound[i] = _max_angvel;
     }
@@ -391,7 +417,7 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd target_params)
 
     // 计算目标和约束的对象
     FG_eval fg_eval;
-    fg_eval.LoadParams(_params, target_params, min_dmbe, ob, init_states);
+    fg_eval.LoadParams(_params, target_params, min_dmbe, ob, init_states, all_obs);
 
     // options for IPOPT solver
     std::string options;

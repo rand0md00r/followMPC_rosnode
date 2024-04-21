@@ -61,13 +61,13 @@
     <!--  ************** obstacles point generation **************  -->
     <node name="obstacle_generation" pkg="mpc_ros" type="obstacle_generation.py">
     </node>
+    <!-- <node name="pub_static_pred_traj" pkg="mpc_ros" type="pub_static_pred_traj.py">
+    </node> -->
+    
 
     <!--  ************** MPC Node **************  -->
-    <node name="MPC_tracking" pkg="mpc_ros" type="follow_mpc" output="screen" >
-        <!-- <rosparam file="$(find mpc_ros)/params/mpc_target_track.yaml" command="load" />
-
-        <param name="mpc_max_angvel" type="double" value="3.0" if="$(eval trajectory_type == 'rectangle')"/>
-        <param name="mpc_w_angvel_d" type="double" value="10000.0" if="$(eval trajectory_type == 'rectangle')"/> -->
+    <node name="MPC_tracking" pkg="mpc_ros" type="pure_mpc" output="screen" >
+        <rosparam file="$(find mpc_ros)/params/pureMPC_euc_dist_avoidance.yaml" command="load" />
     </node>
 
     <!--  ************** Visualisation **************  -->

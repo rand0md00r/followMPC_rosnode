@@ -101,7 +101,7 @@ def generate_trajectory(trajectory_type):
         start_x = 1.0
         start_y = 0.0
         velocity = 0.5
-        distance = 28.0
+        distance = 25.0
 
         def calculate_pose(time):
             x = start_x + velocity * time

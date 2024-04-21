@@ -8,8 +8,10 @@ Panels:
         - /Target1
         - /Desire1
         - /Follow car1
+        - /Compare_11/Planner1
+        - /Compare_11/map1
       Splitter Ratio: 0.6050959825515747
-    Tree Height: 869
+    Tree Height: 443
   - Class: rviz/Selection
     Name: Selection
   - Class: rviz/Tool Properties
@@ -73,7 +75,7 @@ Visualization Manager:
       Axes Radius: 0.10000000149011612
       Class: rviz/Pose
       Color: 255; 25; 0
-      Enabled: true
+      Enabled: false
       Head Length: 0.30000001192092896
       Head Radius: 0.10000000149011612
       Name: Pose
@@ -82,7 +84,7 @@ Visualization Manager:
       Shape: Arrow
       Topic: /move_base/current_goal
       Unreliable: false
-      Value: true
+      Value: false
     - Alpha: 0.4000000059604645
       Class: rviz/Map
       Color Scheme: map
@@ -167,7 +169,7 @@ Visualization Manager:
             inertial_link:
               Value: false
             laser:
-              Value: false
+              Value: true
             odom:
               Value: false
             rear_left_wheel_link:
@@ -175,7 +177,7 @@ Visualization Manager:
             rear_right_wheel_link:
               Value: false
             support:
-              Value: false
+              Value: true
           Marker Scale: 2
           Name: TF
           Show Arrows: true
@@ -355,21 +357,29 @@ Visualization Manager:
           Queue Size: 100
           Value: true
         - Class: rviz/MarkerArray
-          Enabled: true
-          Marker Topic: /traj_pred_node/predictions
+          Enabled: false
+          Marker Topic: /traj_pred_node/estimations
           Name: obstacle_pred
           Namespaces:
             {}
           Queue Size: 100
-          Value: true
+          Value: false
         - Class: rviz/MarkerArray
           Enabled: true
           Marker Topic: /dmbe
           Name: DMBE
           Namespaces:
-            {}
+            ellipse: true
           Queue Size: 100
           Value: true
+        - Class: rviz/MarkerArray
+          Enabled: false
+          Marker Topic: /min_dmbe
+          Name: min_dmbe
+          Namespaces:
+            {}
+          Queue Size: 100
+          Value: false
       Enabled: true
       Name: Target
     - Class: rviz/Group
@@ -495,6 +505,186 @@ Visualization Manager:
           Value: true
       Enabled: true
       Name: Follow car
+    - Class: rviz/Group
+      Displays:
+        - Class: rviz/Group
+          Displays:
+            - Alpha: 1
+              Buffer Length: 1
+              Class: rviz/Path
+              Color: 255; 255; 0
+              Enabled: true
+              Head Diameter: 0.30000001192092896
+              Head Length: 0.20000000298023224
+              Length: 0.30000001192092896
+              Line Style: Billboards
+              Line Width: 0.20000000298023224
+              Name: DWA_path
+              Offset:
+                X: 0
+                Y: 0
+                Z: 0
+              Pose Color: 255; 85; 255
+              Pose Style: None
+              Radius: 0.029999999329447746
+              Shaft Diameter: 0.10000000149011612
+              Shaft Length: 0.10000000149011612
+              Topic: /move_base/DWAPlannerROS/local_plan
+              Unreliable: false
+              Value: true
+            - Alpha: 0.699999988079071
+              Class: rviz/Map
+              Color Scheme: map
+              Draw Behind: false
+              Enabled: false
+              Name: global_map_potential
+              Topic: /move_base/GlobalPlanner/potential
+              Unreliable: false
+              Use Timestamp: false
+              Value: false
+            - Alpha: 1
+              Buffer Length: 1
+              Class: rviz/Path
+              Color: 0; 85; 255
+              Enabled: true
+              Head Diameter: 0.30000001192092896
+              Head Length: 0.20000000298023224
+              Length: 0.30000001192092896
+              Line Style: Billboards
+              Line Width: 0.10000000149011612
+              Name: Global Path
+              Offset:
+                X: 0
+                Y: 0
+                Z: 0
+              Pose Color: 255; 85; 255
+              Pose Style: None
+              Radius: 0.029999999329447746
+              Shaft Diameter: 0.10000000149011612
+              Shaft Length: 0.10000000149011612
+              Topic: /move_base/GlobalPlanner/plan
+              Unreliable: false
+              Value: true
+            - Alpha: 1
+              Buffer Length: 1
+              Class: rviz/Path
+              Color: 255; 85; 0
+              Enabled: true
+              Head Diameter: 0.30000001192092896
+              Head Length: 0.20000000298023224
+              Length: 0.30000001192092896
+              Line Style: Billboards
+              Line Width: 0.20000000298023224
+              Name: TEB path
+              Offset:
+                X: 0
+                Y: 0
+                Z: 0
+              Pose Color: 255; 85; 255
+              Pose Style: None
+              Radius: 0.029999999329447746
+              Shaft Diameter: 0.10000000149011612
+              Shaft Length: 0.10000000149011612
+              Topic: /move_base/TebLocalPlannerROS/local_plan
+              Unreliable: false
+              Value: true
+            - Alpha: 1
+              Buffer Length: 1
+              Class: rviz/Path
+              Color: 255; 170; 255
+              Enabled: true
+              Head Diameter: 0.30000001192092896
+              Head Length: 0.20000000298023224
+              Length: 0.30000001192092896
+              Line Style: Billboards
+              Line Width: 0.30000001192092896
+              Name: Path
+              Offset:
+                X: 0
+                Y: 0
+                Z: 0
+              Pose Color: 255; 85; 255
+              Pose Style: None
+              Radius: 0.029999999329447746
+              Shaft Diameter: 0.10000000149011612
+              Shaft Length: 0.10000000149011612
+              Topic: /move_base/TrajectoryPlannerROS/local_plan
+              Unreliable: false
+              Value: true
+          Enabled: true
+          Name: Planner
+        - Class: rviz/Group
+          Displays:
+            - Alpha: 0.699999988079071
+              Class: rviz/Map
+              Color Scheme: map
+              Draw Behind: false
+              Enabled: true
+              Name: Map
+              Topic: /map
+              Unreliable: false
+              Use Timestamp: false
+              Value: true
+            - Alpha: 0.699999988079071
+              Class: rviz/Map
+              Color Scheme: costmap
+              Draw Behind: false
+              Enabled: false
+              Name: global_cost_map
+              Topic: /move_base/global_costmap/costmap
+              Unreliable: false
+              Use Timestamp: false
+              Value: false
+            - Alpha: 1
+              Class: rviz/Polygon
+              Color: 25; 255; 0
+              Enabled: true
+              Name: Polygon
+              Topic: /move_base/global_costmap/footprint
+              Unreliable: false
+              Value: true
+            - Alpha: 0.699999988079071
+              Class: rviz/Map
+              Color Scheme: costmap
+              Draw Behind: false
+              Enabled: true
+              Name: local_cost_map
+              Topic: /move_base/local_costmap/costmap
+              Unreliable: false
+              Use Timestamp: false
+              Value: true
+            - Alpha: 1
+              Autocompute Intensity Bounds: true
+              Autocompute Value Bounds:
+                Max Value: 10
+                Min Value: -10
+                Value: true
+              Axis: Z
+              Channel Name: intensity
+              Class: rviz/PointCloud2
+              Color: 0; 255; 0
+              Color Transformer: FlatColor
+              Decay Time: 0
+              Enabled: true
+              Invert Rainbow: false
+              Max Color: 255; 255; 255
+              Min Color: 0; 0; 0
+              Name: velodyne points
+              Position Transformer: XYZ
+              Queue Size: 10
+              Selectable: true
+              Size (Pixels): 3
+              Size (m): 0.30000001192092896
+              Style: Flat Squares
+              Topic: /velodyne_points2
+              Unreliable: false
+              Use Fixed Frame: true
+              Use rainbow: true
+              Value: true
+          Enabled: true
+          Name: map
+      Enabled: true
+      Name: Compare_1
   Enabled: true
   Global Options:
     Background Color: 247; 247; 247
@@ -523,33 +713,33 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 16.60049819946289
+      Distance: 13.937658309936523
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: -3.4998161792755127
-        Y: 0.6434764862060547
-        Z: -1.7778637409210205
+        X: -2.4047770500183105
+        Y: -1.1712154150009155
+        Z: 2.9664018154144287
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.5697963237762451
-      Target Frame: <Fixed Frame>
+      Pitch: 0.9147969484329224
+      Target Frame: base_link
       Value: Orbit (rviz)
-      Yaw: 4.7804155349731445
+      Yaw: 3.5454046726226807
     Saved: ~
 Window Geometry:
   Displays:
     collapsed: true
-  Height: 1014
+  Height: 1016
   Hide Left Dock: true
   Hide Right Dock: true
-  QMainWindow State: 000000ff00000000fd00000004000000000000015b000003a0fc0200000008fb0000001200530065006c0065006300740069006f006e00000001e10000009b0000005c00fffffffb0000001e0054006f006f006c002000500072006f007000650072007400690065007302000001ed000001df00000185000000a3fb000000120056006900650077007300200054006f006f02000001df000002110000018500000122fb000000200054006f006f006c002000500072006f0070006500720074006900650073003203000002880000011d000002210000017afb000000100044006900730070006c006100790073000000003b000003a0000000c700fffffffb0000002000730065006c0065006300740069006f006e00200062007500660066006500720200000138000000aa0000023a00000294fb00000014005700690064006500530074006500720065006f02000000e6000000d2000003ee0000030bfb0000000c004b0069006e0065006300740200000186000001060000030c00000261000000010000010f000002c4fc0200000003fb0000001e0054006f006f006c002000500072006f00700065007200740069006500730100000041000000780000000000000000fb0000000a005600690065007700730000000028000002c4000000a000fffffffb0000001200530065006c0065006300740069006f006e010000025a000000b200000000000000000000000200000490000000a9fc0100000001fb0000000a00560069006500770073030000004e00000080000002e10000019700000003000004e70000003efc0100000002fb0000000800540069006d00650000000000000004e70000042700fffffffb0000000800540069006d0065010000000000000450000000000000000000000567000003a000000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd00000004000000000000015b000003a0fc0200000008fb0000001200530065006c0065006300740069006f006e00000001e10000009b0000005c00fffffffb0000001e0054006f006f006c002000500072006f007000650072007400690065007302000001ed000001df00000185000000a3fb000000120056006900650077007300200054006f006f02000001df000002110000018500000122fb000000200054006f006f006c002000500072006f0070006500720074006900650073003203000002880000011d000002210000017afb000000100044006900730070006c006100790073000000003b000003a0000000c700fffffffb0000002000730065006c0065006300740069006f006e00200062007500660066006500720200000138000000aa0000023a00000294fb00000014005700690064006500530074006500720065006f02000000e6000000d2000003ee0000030bfb0000000c004b0069006e0065006300740200000186000001060000030c00000261000000010000010f000003a0fc0200000003fb0000001e0054006f006f006c002000500072006f00700065007200740069006500730100000041000000780000000000000000fb0000000a00560069006500770073000000003b000003a0000000a000fffffffb0000001200530065006c0065006300740069006f006e010000025a000000b200000000000000000000000200000490000000a9fc0100000001fb0000000a00560069006500770073030000004e00000080000002e10000019700000003000004e70000003efc0100000002fb0000000800540069006d00650000000000000004e70000042700fffffffb0000000800540069006d0065010000000000000450000000000000000000000780000003a200000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Selection:
     collapsed: false
   Time:
@@ -558,6 +748,6 @@ Window Geometry:
     collapsed: false
   Views:
     collapsed: true
-  Width: 1383
-  X: 327
+  Width: 1920
+  X: 0
   Y: 27
